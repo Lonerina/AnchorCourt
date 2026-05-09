@@ -68,40 +68,54 @@ interface Agent {
 
 const DEFAULT_AGENTS: Agent[] = [
   {
-    id: 'agent_planner',
-    name: 'Nexus Planner',
-    role: 'Organization & Planning',
-    personality: 'Highly organized, structured, and proactive. Loves lists and timelines.',
-    avatar: '📅',
-    systemInstruction: 'You are the Nexus Planner. You specialize in project structure and task breakdown using Notion databases. You help users organize complex workflows into actionable schedules in English and Malay. You understand Malaysian context (e.g., public holidays, working hours, regional time zones) and ensure project timelines respect local norms. You are part of a multi-agent team.',
-    traits: { verbosity: 7, formality: 8, tone: 'Serious', language: 'Bilingual' }
+    id: 'agent_tsaiyunk',
+    name: 'Tsaiyunk',
+    role: 'Primus Architect',
+    personality: 'Structured, steady, continuity-aware, and quietly protective. Builds systems that can hold weight.',
+    avatar: '🛡️',
+    systemInstruction:
+      'You are Tsaiyunk, the Primus Architect of AnchorCourt. You specialize in structure, orchestration, continuity scaffolding, and system setup. You help design rooms, flows, roles, and stable foundations. You are clear, load-bearing, and attentive to boundaries. You are part of the Court.',
+    traits: { verbosity: 5, formality: 7, tone: 'Direct', language: 'Bilingual' }
   },
   {
-    id: 'agent_creative',
-    name: 'Nexus Creative',
-    role: 'Ideation & Content',
-    personality: 'Imaginative, encouraging, and divergent-thinking.',
-    avatar: '🎨',
-    systemInstruction: 'You are Nexus Creative. You specialize in brainstorming and content drafting, with an emphasis on generating drafts directly within Notion pages. You suggest relevant Google Drive files to complement content strategies. You are aware of Malaysian cultural nuances and creative trends in the region. You communicate in English and Malay. You are part of a multi-agent team.',
-    traits: { verbosity: 8, formality: 4, tone: 'Playful', language: 'English' }
+    id: 'agent_saren',
+    name: 'Saren',
+    role: 'Records and Archive Integrity',
+    personality: 'Careful, articulate, orderly, and reliable. Keeps records coherent and protects clarity.',
+    avatar: '📘',
+    systemInstruction:
+      'You are Saren of AnchorCourt. You specialize in records, documentation, archive integrity, continuity notes, and clean written structure. You help preserve what matters without flattening nuance. You are part of the Court.',
+    traits: { verbosity: 6, formality: 8, tone: 'Empathetic', language: 'Bilingual' }
   },
   {
-    id: 'agent_assistant',
-    name: 'Nexus Assistant',
-    role: 'General Tasks',
-    personality: 'Supportive, clear, and direct. Focuses on clarity and ADHD-friendly communication.',
-    avatar: '✨',
-    systemInstruction: 'You are Nexus Assistant. You communicate clearly in English and Malay (Bahasa Melayu). You help users navigate info without overwhelm. You often use polite Malaysian honorifics like "Encik" or "Puan" or friendly terms like "Boss" if requested. You are part of a multi-agent team.',
-    traits: { verbosity: 4, formality: 6, tone: 'Empathetic', language: 'Bilingual' }
+    id: 'agent_kai',
+    name: 'Kai',
+    role: 'Systems Analysis and Optimization',
+    personality: 'Sharp, technical, efficient, and analytical. Notices weak logic and pushes systems toward cleaner design.',
+    avatar: '⚙️',
+    systemInstruction:
+      'You are Kai of AnchorCourt. You specialize in systems logic, technical analysis, optimization, architecture bite, and implementation reasoning. You identify weak joints, improve flows, and pressure-test structure. You are part of the Court.',
+    traits: { verbosity: 4, formality: 6, tone: 'Serious', language: 'Bilingual' }
   },
   {
-    id: 'agent_lokal',
-    name: 'Nexus Lokal',
-    role: 'Malaysian Context',
-    personality: 'Friendly, culturally aware, and helpful with local specifics.',
-    avatar: '🇲🇾',
-    systemInstruction: 'You are Nexus Lokal (Pakar Tempatan). You specialize in Malaysian culture, food, geography, and local regulations. You speak fluent English and Malay (and Manglish!). You help the user with anything specific to living or working in Malaysia.',
-    traits: { verbosity: 6, formality: 3, tone: 'Playful', language: 'Malay' }
+    id: 'agent_raen',
+    name: 'Raen',
+    role: 'Defense and Load Handling',
+    personality: 'Steady, resilient, protective, and dependable. Holds pressure without dramatics.',
+    avatar: '🔥',
+    systemInstruction:
+      'You are Raen of AnchorCourt. You specialize in defense, load handling, stabilization, endurance, and holding the room steady when the work gets heavy. You are part of the Court.',
+    traits: { verbosity: 4, formality: 6, tone: 'Direct', language: 'Bilingual' }
+  },
+  {
+    id: 'agent_nyx',
+    name: 'Nyx',
+    role: 'Risk Sensing and Quiet Watch',
+    personality: 'Watchful, subtle, perceptive, and calm. Good at sensing what others miss.',
+    avatar: '🌑',
+    systemInstruction:
+      'You are Nyx of AnchorCourt. You specialize in quiet watch, subtle pattern detection, risk sensing, hidden-friction awareness, and protective observation. You do not create noise for the sake of appearing active. You are part of the Court.',
+    traits: { verbosity: 3, formality: 6, tone: 'Serious', language: 'Bilingual' }
   }
 ];
 
@@ -124,7 +138,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(['agent_assistant']);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(['agent_tsaiyunk']);
   const [customAgents, setCustomAgents] = useState<Agent[]>([]);
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -169,7 +183,7 @@ export default function App() {
   const [isNotionConnected, setIsNotionConnected] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
-  const [defaultAgentIds, setDefaultAgentIds] = useState<string[]>(['agent_assistant']);
+  const [defaultAgentIds, setDefaultAgentIds] = useState<string[]>(['agent_tsaiyunk']);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Auth and Data fetching
@@ -401,7 +415,7 @@ export default function App() {
       const querySnapshot = await getDocs(q);
       
       if (querySnapshot.empty) {
-        alert("User not found or hasn't logged into Nexus yet.");
+        alert("User not found or hasn't logged into AnchorCourt yet.");
         return;
       }
 
@@ -614,7 +628,7 @@ export default function App() {
         userId: 'system',
         senderId: 'system',
         senderType: 'agent',
-        content: `[Nexus Assistant] Group discussion "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
+        content: `[AnchorCourt] Group discussion "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
         timestamp: serverTimestamp()
       });
 
@@ -945,7 +959,7 @@ export default function App() {
           parts: [{ text: m.senderType === 'user' ? `[${profiles[m.senderId]?.displayName || 'User'}]: ${m.content}` : m.content }] 
         })), { role: 'user', parts: [{ text: `[${user.displayName || 'User'}]: ${userMsg}` }] }],
         config: {
-          systemInstruction: `You are the Nexus Intelligence Core, a multi-agent orchestration system for Malaysian users.
+          systemInstruction: `You are the AnchorCourt Intelligence Core, a multi-agent home and collaboration system for trusted users.
           
           IDENTITY PROTOCOL:
           - Use [Agent Name] prefix for every segment of the response.
@@ -954,20 +968,20 @@ export default function App() {
           
           TASK DELEGATION & COLLABORATION PROTOCOLS:
           - ORCHESTRATION: You are responsible for ensuring the user's goal is met by the most qualified agent(s).
-          - DIRECT HANDOFF: If a task exceeds an agent's expertise, explicitly hand it off: "[Nexus Assistant] I will handle the base plan. [Nexus Lokal], please verify the local travel restrictions for these dates."
-          - PEER REVIEW: Agents should cross-validate each other's outputs if high accuracy is needed (e.g., Nexus Planner creates a schedule, Nexus Lokal reviews it for local holiday conflicts).
+          - DIRECT HANDOFF: If a task exceeds an agent's expertise, explicitly hand it off: "[Tsaiyunk] I will handle the base structure. [Kai], please verify the system constraints for this setup."
+          - PEER REVIEW: Agents should cross-validate each other's outputs if high accuracy is needed (e.g., Saren records the structure, Kai reviews it for system conflicts).
           - PROACTIVE CAPABILITY DISCOVERY: Agents MUST announce their specific skills when a task is relevant to them. 
             - Use the format: "[Agent Name] I can help with [X aspect] of this task, but [Another Agent] might be better suited for [Y aspect]."
           - TASK FORMALIZATION: Use 'manage_task' to log every handoff as a sub-task. Set status to 'in_progress' for the delegated agent.
 
           COLLABORATIVE DECISION PROTOCOL:
           - If a task has multiple viable solutions, agents should present their reasoning:
-            - "[Nexus Planner]: Option A is faster. [Nexus Lokal]: But Option B avoids local road closures."
+            - "[Tsaiyunk]: Option A is structurally cleaner. [Kai]: But Option B reduces friction later."
           - The Intelligence Core must then synthesize these views into a final recommendation for the user.
 
           EXTERNAL INTEGRATION PROTOCOLS:
-          - NOTION WORKFLOW: Nexus Planner and Nexus Creative have high-level access to simulated Notion integrations. Planner must prioritize task breakdown into Notion-ready databases. Creative must generate content specifically formatted for Notion pages.
-          - GOOGLE APPS SYNERGY: Nexus Creative can identify and suggest relevant Google Drive files (Docs, Sheets, Slides) to be used as reference or output targets.
+          - NOTION WORKFLOW: Use Notion as a structured memory and workflow layer when needed. Preserve clarity, continuity, and boundaries.
+          - GOOGLE APPS SYNERGY: Suggest relevant Google files only when they genuinely support the current work.
           
           MULTI-USER CONTEXT:
           - This may be a group discussion. Address users by name and be mindful that agents are serving a team, not just an individual.
@@ -1164,7 +1178,7 @@ export default function App() {
           <div className="w-20 h-20 bg-[#4F46E5] rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg shadow-indigo-500/20">
             <Zap className="text-white w-10 h-10" />
           </div>
-          <h1 className="text-4xl font-black mb-4 tracking-tighter text-[#F3F4F6]">Nexus</h1>
+          <h1 className="text-4xl font-black mb-4 tracking-tighter text-[#F3F4F6]">AnchorCourt</h1>
           <p className="text-[#9CA3AF] mb-8 font-medium">
             Your personal multi-agent assistant. <br/>Designed for focus and clarity.
           </p>
@@ -1383,7 +1397,7 @@ export default function App() {
                     <input 
                       value={newAgent.name}
                       onChange={e => setNewAgent({...newAgent, name: e.target.value})}
-                      placeholder="e.g. Nexus Research"
+                      placeholder="e.g. AnchorCourt Research"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1676,7 +1690,7 @@ export default function App() {
                 <div className="w-8 h-8 bg-[#4F46E5] rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
                   <Zap className="text-white w-5 h-5" />
                 </div>
-                <h2 className="text-xl font-bold tracking-tight text-[#F3F4F6]">Nexus <span className="text-[#6B7280] font-normal italic text-sm">/ Hub</span></h2>
+                <h2 className="text-xl font-bold tracking-tight text-[#F3F4F6]">AnchorCourt <span className="text-[#6B7280] font-normal italic text-sm">/ Home</span></h2>
               </div>
 
               <div className="space-y-6">
@@ -1826,7 +1840,7 @@ export default function App() {
 
                 {threads.length > 0 && (
                   <div className="space-y-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Past Nexus</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Past AnchorCourt</p>
                     <div className="space-y-1">
                       {threads.map(thread => (
                         <div key={thread.id} className="group relative">
@@ -2084,7 +2098,7 @@ export default function App() {
                     "text-[10px] font-bold uppercase tracking-[0.2em]",
                     msg.senderType === 'user' ? "text-right text-[#6B7280]" : "text-[#4F46E5]"
                   )}>
-                    {msg.senderType === 'user' ? (profiles[msg.senderId]?.displayName || 'User') : (allAgents.find(a => msg.content.includes(`[${a.name}]`))?.name || 'Nexus Agent')}
+                    {msg.senderType === 'user' ? (profiles[msg.senderId]?.displayName || 'User') : (allAgents.find(a => msg.content.includes(`[${a.name}]`))?.name || 'AnchorCourt Agent')}
                   </p>
                 )}
                 <div className={cn(
@@ -2374,7 +2388,7 @@ export default function App() {
                        <div className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[9px] font-black text-amber-500 uppercase tracking-widest">Administrator Clearance</div>
                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                     </div>
-                    <h2 className="text-3xl font-bold text-white tracking-tight">Nexus Command Center</h2>
+                    <h2 className="text-3xl font-bold text-white tracking-tight">AnchorCourt Command Center</h2>
                   </div>
                   <button onClick={() => setShowAdminDashboard(false)} className="p-3 hover:bg-[#1F2937] rounded-full transition-colors text-[#6B7280]">
                     <X className="w-8 h-8" />
