@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'google.com');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Profiles
+    match /profiles/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+    }
+
+    // Threads
+    match /threads/{threadId} {
+      allow get: if isSignedIn() && request.auth.uid in existing().memberIds;
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow create: if isSignedIn() 
+                    && isValidId(threadId)
+                    && incoming().userId == request.auth.uid
+                    && request.auth.uid in incoming().memberIds
+                    && incoming().title is string && incoming().title.size() <= 100;
+      allow update: if isSignedIn() 
+                    && request.auth.uid in existing().memberIds
+                    && incoming().userId == existing().userId
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'activeAgentIds', 'memberIds', 'updatedAt', 'lastMessage']);
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && get(/databases/$(database)/documents/threads/$(threadId)).data.memberIds.hasAny([request.auth.uid]);
+        allow list: if isSignedIn() && get(/databases/$(database)/documents/threads/$(threadId)).data.memberIds.hasAny([request.auth.uid]);
+        allow create: if isSignedIn() 
+                      && isValidId(messageId)
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.memberIds
+                      && incoming().userId == request.auth.uid
+                      // Users can only send messages as 'user'
+                      && (incoming().senderType == 'user' ? incoming().senderId == request.auth.uid : true)
+                      && incoming().content is string && incoming().content.size() <= 5000;
+      }
+    }
+
+    // Users
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      
+      match /private/integrations {
+        allow get: if isOwner(userId);
+        allow create: if isOwner(userId) && incoming().keys().hasAll(['notion']) || incoming().keys().hasAll(['google']);
+        allow update: if isOwner(userId);
+      }
+
+      match /agents/{agentId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.userId == userId;
+        allow create: if isOwner(userId) 
+                      && isValidId(agentId)
+                      && incoming().userId == userId
+                      && incoming().name is string && incoming().name.size() <= 50;
+        allow update: if isOwner(userId) 
+                      && incoming().userId == userId
+                      && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'personality', 'avatar', 'systemInstruction', 'traits']);
+        allow delete: if isOwner(userId);
+      }
+    }
+    
+    // Test collection for valid connection check
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Tasks
+    match /tasks/{taskId} {
+      allow get: if isSignedIn() 
+                 && (existing().userId == request.auth.uid 
+                     || get(/databases/$(database)/documents/threads/$(existing().threadId)).data.memberIds.hasAny([request.auth.uid]));
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid; // Keep list simple by userId for now
+      allow create: if isSignedIn() 
+                    && isValidId(taskId)
+                    && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() 
+                    && (existing().userId == request.auth.uid || get(/databases/$(database)/documents/threads/$(existing().threadId)).data.memberIds.hasAny([request.auth.uid]))
+                    && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.token.email == 'themunawarsfamily@gmail.com';
+    }
+  }
+}

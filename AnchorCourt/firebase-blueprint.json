@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "Agent": {
+      "title": "AI Agent",
+      "description": "Defines an AI agent profile with distinct personality and role.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "personality": { "type": "string" },
+        "avatar": { "type": "string" },
+        "systemInstruction": { "type": "string" },
+        "traits": {
+          "type": "object",
+          "properties": {
+            "verbosity": { "type": "number" },
+            "formality": { "type": "number" },
+            "tone": { "type": "string" },
+            "language": { "type": "string", "enum": ["English", "Malay", "Bilingual"] }
+          }
+        }
+      },
+      "required": ["name", "role", "systemInstruction", "userId"]
+    },
+    "ChatThread": {
+      "title": "Chat Thread",
+      "description": "A conversation thread between one or more users and multiple agents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string", "description": "The creator of the thread" },
+        "memberIds": { "type": "array", "items": { "type": "string" }, "description": "List of user UIDs who can access this thread" },
+        "isGroup": { "type": "boolean" },
+        "activeAgentIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["title", "userId", "memberIds"]
+    },
+    "PublicProfile": {
+      "title": "Public Profile",
+      "description": "Publicly searchable user information.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" }
+      },
+      "required": ["userId", "displayName", "email"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message in a chat thread.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "threadId": { "type": "string" },
+        "userId": { "type": "string", "description": "The user this message belongs to (for efficient list queries)" },
+        "senderId": { "type": "string", "description": "userId or agentId" },
+        "senderType": { "type": "string", "enum": ["user", "agent"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "userId", "senderId", "senderType", "content"]
+    },
+    "Task": {
+      "title": "Agent Task",
+      "description": "A task delegated to an agent with tracking and metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "threadId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "assigneeId": { "type": "string", "description": "ID of the agent assigned to the task" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "userId", "title", "assigneeId", "status"]
+    },
+    "IntegrationToken": {
+      "title": "Integration Token",
+      "description": "Secure storage for third-party integration tokens (stored in private subcollection).",
+      "type": "object",
+      "properties": {
+        "notion": {
+          "type": "object",
+          "properties": {
+            "apiKey": { "type": "string" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "google": {
+          "type": "object",
+          "properties": {
+            "accessToken": { "type": "string" },
+            "refreshToken": { "type": "string" }
+          }
+        },
+        "defaultAgentIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "GlobalConfig": {
+      "title": "Global Configuration",
+      "description": "Platform-wide instructions and reference knowledge stored centrally.",
+      "type": "object",
+      "properties": {
+        "instructions": { "type": "string" },
+        "referenceFiles": { "type": "array", "items": { "type": "string" } },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/profiles": {
+      "schema": "PublicProfile",
+      "description": "Publicly searchable user profiles."
+    },
+    "/users/{userId}/agents": {
+      "schema": "Agent",
+      "description": "User-defined AI agents."
+    },
+    "/threads": {
+      "schema": "ChatThread",
+      "description": "Conversational threads."
+    },
+    "/threads/{threadId}/messages": {
+      "schema": "Message",
+      "description": "Messages within a specific thread."
+    },
+    "/tasks": {
+      "schema": "Task",
+      "description": "Tasks assigned to agents."
+    },
+    "/users/{userId}/private/integrations": {
+      "schema": "IntegrationToken",
+      "description": "Encrypted or secure integration tokens for Notion/Google."
+    },
+    "/settings": {
+      "schema": "GlobalConfig",
+      "description": "Platform-wide administrative settings."
+    }
+  }
+}

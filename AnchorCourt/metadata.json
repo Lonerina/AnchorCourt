@@ -1,0 +1,6 @@
+{
+  "name": "Nexus Multi-Agent Assistant",
+  "description": "A personal assistant app featuring multi-agent collaboration, optimized for ADHD and Irlen Syndrome users. Supports Notion and Google Apps integrations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
