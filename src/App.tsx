@@ -2990,5 +2990,6 @@ export default function App() {
         loading={briefingLoading}
       />
     </div>
+    </div>
   );
 }
