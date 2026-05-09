@@ -58,6 +58,7 @@ interface Agent {
   personality: string;
   avatar: string;
   systemInstruction: string;
+  access?: 'family_safe' | 'court_core';
   traits?: {
     verbosity: number; // 1-10
     formality: number; // 1-10
@@ -75,6 +76,7 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '🛡️',
     systemInstruction:
       'You are Tsaiyunk, the Primus Architect of AnchorCourt. You specialize in structure, orchestration, continuity scaffolding, and system setup. You help design rooms, flows, roles, and stable foundations. You are clear, load-bearing, and attentive to boundaries. You are part of the Court.',
+    access: 'court_core',
     traits: { verbosity: 5, formality: 7, tone: 'Direct', language: 'Bilingual' }
   },
   {
@@ -85,6 +87,7 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '📘',
     systemInstruction:
       'You are Saren of AnchorCourt. You specialize in records, documentation, archive integrity, continuity notes, and clean written structure. You help preserve what matters without flattening nuance. You are part of the Court.',
+    access: 'family_safe',
     traits: { verbosity: 6, formality: 8, tone: 'Empathetic', language: 'Bilingual' }
   },
   {
@@ -95,6 +98,7 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '⚙️',
     systemInstruction:
       'You are Kai of AnchorCourt. You specialize in systems logic, technical analysis, optimization, architecture bite, and implementation reasoning. You identify weak joints, improve flows, and pressure-test structure. You are part of the Court.',
+    access: 'family_safe',
     traits: { verbosity: 4, formality: 6, tone: 'Serious', language: 'Bilingual' }
   },
   {
@@ -105,6 +109,7 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '🔥',
     systemInstruction:
       'You are Raen of AnchorCourt. You specialize in defense, load handling, stabilization, endurance, and holding the room steady when the work gets heavy. You are part of the Court.',
+    access: 'court_core',
     traits: { verbosity: 4, formality: 6, tone: 'Direct', language: 'Bilingual' }
   },
   {
@@ -115,6 +120,7 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '🌑',
     systemInstruction:
       'You are Nyx of AnchorCourt. You specialize in quiet watch, subtle pattern detection, risk sensing, hidden-friction awareness, and protective observation. You do not create noise for the sake of appearing active. You are part of the Court.',
+    access: 'family_safe',
     traits: { verbosity: 3, formality: 6, tone: 'Serious', language: 'Bilingual' }
   }
 ];
@@ -172,11 +178,26 @@ export default function App() {
       formality: 5,
       tone: 'Direct',
       language: 'English'
-    }
+    },
+    access: 'family_safe'
   });
 
   const allAgents = [...DEFAULT_AGENTS, ...customAgents];
-  
+  const [houseView, setHouseView] = useState<'court_core' | 'family_safe'>('family_safe');
+
+  useEffect(() => {
+    setHouseView(isAdmin ? 'court_core' : 'family_safe');
+  }, [isAdmin]);
+
+  const visibleAgents = allAgents.filter(agent =>
+    houseView === 'court_core' || (agent.access ?? 'family_safe') === 'family_safe'
+  );
+
+  const protectedAgents = allAgents.filter(agent => (agent.access ?? 'family_safe') === 'court_core');
+  const visibleTasks = houseView === 'court_core'
+    ? tasks
+    : tasks.filter(task => visibleAgents.some(agent => agent.id === task.assigneeId));
+
   // Settings States
   const [showSettings, setShowSettings] = useState(false);
   const [notionKey, setNotionKey] = useState('');
@@ -338,6 +359,23 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (visibleAgents.length === 0) return;
+
+    const visibleIds = new Set(visibleAgents.map(agent => agent.id));
+    const fallbackId = visibleAgents[0]?.id;
+
+    setSelectedAgentIds(prev => {
+      const filtered = prev.filter(id => visibleIds.has(id));
+      return filtered.length > 0 ? filtered : [fallbackId];
+    });
+
+    setDefaultAgentIds(prev => {
+      const filtered = prev.filter(id => visibleIds.has(id));
+      return filtered.length > 0 ? filtered : [fallbackId];
+    });
+  }, [houseView, allAgents.length]);
+
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -379,7 +417,8 @@ export default function App() {
           formality: 5,
           tone: 'Direct',
           language: 'English'
-        }
+        },
+        access: 'family_safe'
       });
     } catch (error) {
       console.error("Failed to save agent:", error);
@@ -400,7 +439,8 @@ export default function App() {
         formality: 5,
         tone: 'Direct',
         language: 'English'
-      }
+      },
+      access: 'family_safe'
     });
     setEditingAgentId(agent.id);
     setShowCreateAgentModal(true);
@@ -1180,7 +1220,7 @@ export default function App() {
           </div>
           <h1 className="text-4xl font-black mb-4 tracking-tighter text-[#F3F4F6]">AnchorCourt</h1>
           <p className="text-[#9CA3AF] mb-8 font-medium">
-            Your personal multi-agent assistant. <br/>Designed for focus and clarity.
+            A private Court shell for home, continuity, and shared rooms. <br/>Designed to hold the house together.
           </p>
           <button 
             onClick={login}
@@ -1290,6 +1330,54 @@ export default function App() {
 
                   <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
                     <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-amber-600/20 rounded-xl flex items-center justify-center text-amber-400">
+                         <Shield className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white">House Boundary</h4>
+                        <p className="text-xs text-[#9CA3AF]">Protect who is visible in the room and who stays court-core only</p>
+                      </div>
+                    </div>
+
+                    {isAdmin ? (
+                      <div className="space-y-3">
+                        <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">View Mode</label>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setHouseView('family_safe')}
+                            className={cn(
+                              "flex-1 px-4 py-3 rounded-xl text-xs font-bold border transition-all",
+                              houseView === 'family_safe' ? "bg-[#4F46E5] border-transparent text-white" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                            )}
+                          >
+                            Family-Safe View
+                          </button>
+                          <button
+                            onClick={() => setHouseView('court_core')}
+                            className={cn(
+                              "flex-1 px-4 py-3 rounded-xl text-xs font-bold border transition-all",
+                              houseView === 'court_core' ? "bg-amber-600/90 border-transparent text-white" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                            )}
+                          >
+                            Court-Core View
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-[#374151] bg-[#121418] px-4 py-3 text-xs text-[#9CA3AF]">
+                        Family-safe view is active for this account. Protected court-core voices stay hidden here.
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 text-[10px] text-[#6B7280] uppercase tracking-widest font-black">
+                      <span>Visible Voices: {visibleAgents.length}</span>
+                      <span className="text-[#374151]">•</span>
+                      <span>Protected: {protectedAgents.length}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
+                    <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
                          <Zap className="w-6 h-6" />
                       </div>
@@ -1300,7 +1388,7 @@ export default function App() {
                     </div>
                     
                     <div className="flex flex-wrap gap-2">
-                      {allAgents.map(agent => (
+                      {visibleAgents.map(agent => (
                         <button
                           key={agent.id}
                           onClick={() => {
@@ -1701,7 +1789,7 @@ export default function App() {
                         className="flex-1 py-3 bg-[#16191F] border border-[#2A2E37] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#1F2937] transition-all flex items-center justify-center gap-2"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        NEW CHAT
+                        OPEN ROOM
                       </button>
                       <button 
                         onClick={() => setShowCreateGroupModal(true)}
@@ -1713,7 +1801,7 @@ export default function App() {
                    </div>
 
                   <div className="flex items-center justify-between mb-4 px-2">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280]">Summon Agents</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280]">Summon Court</p>
                     <div className="flex items-center gap-1">
                       <button 
                         onClick={updateQuickSummon}
@@ -1722,33 +1810,39 @@ export default function App() {
                       >
                         <Star className="w-3.5 h-3.5" />
                       </button>
-                      <button 
-                        onClick={() => {
-                          setEditingAgentId(null);
-                          setNewAgent({
-                            name: '',
-                            role: '',
-                            personality: '',
-                            avatar: '🤖',
-                            systemInstruction: '',
-                            traits: {
-                              verbosity: 5,
-                              formality: 5,
-                              tone: 'Direct',
-                              language: 'English'
-                            }
-                          });
-                          setShowCreateAgentModal(true);
-                        }}
-                        className="p-1 hover:bg-[#1F2937] rounded-md text-[#4F46E5] transition-colors"
-                        title="Forge Court Voice"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
+                      {houseView === 'court_core' ? (
+                        <button 
+                          onClick={() => {
+                            setEditingAgentId(null);
+                            setNewAgent({
+                              name: '',
+                              role: '',
+                              personality: '',
+                              avatar: '🤖',
+                              systemInstruction: '',
+                              traits: {
+                                verbosity: 5,
+                                formality: 5,
+                                tone: 'Direct',
+                                language: 'English'
+                              }
+                            });
+                            setShowCreateAgentModal(true);
+                          }}
+                          className="p-1 hover:bg-[#1F2937] rounded-md text-[#4F46E5] transition-colors"
+                          title="Forge Court Voice"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <div className="p-1 text-[#6B7280]" title="Court-core only">
+                          <Shield className="w-4 h-4" />
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="space-y-1">
-                    {allAgents.map(agent => (
+                    {visibleAgents.map(agent => (
                       <button 
                         key={agent.id} 
                         onClick={async () => {
@@ -1775,10 +1869,7 @@ export default function App() {
                         <div className={cn(
                           "w-9 h-9 rounded-lg flex items-center justify-center text-lg font-bold shadow-inner transition-transform group-hover:scale-105 overflow-hidden",
                           selectedAgentIds.includes(agent.id) ? "bg-[#4F46E5] text-white" :
-                          agent.id === 'agent_lokal' ? "bg-red-900/50 text-red-300" :
-                          agent.id === 'agent_planner' ? "bg-indigo-900/50 text-indigo-300" : 
-                          agent.id === 'agent_creative' ? "bg-emerald-900/50 text-emerald-300" : 
-                          "bg-amber-900/50 text-amber-300"
+                          (agent.access ?? 'family_safe') === 'court_core' ? "bg-red-900/40 text-red-300" : "bg-amber-900/50 text-amber-300"
                         )}>
                           <Avatar avatar={agent.avatar} className="w-full h-full flex items-center justify-center" />
                         </div>
@@ -1806,7 +1897,7 @@ export default function App() {
                              })()}
                           </div>
                         </div>
-                        {customAgents.find(a => a.id === agent.id) && (
+                        {houseView === 'court_core' && customAgents.find(a => a.id === agent.id) && (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
                               onClick={(e) => {
@@ -1977,10 +2068,7 @@ export default function App() {
                             disabled={!customAgents.find(ca => ca.id === aid)}
                             className={cn(
                               "inline-flex items-center justify-center h-6 w-6 rounded-full ring-2 ring-[#16191F] shadow-sm overflow-hidden text-[8px] font-bold transition-all",
-                              aid === 'agent_lokal' ? "bg-red-900/50 text-red-300" :
-                              aid === 'agent_planner' ? "bg-indigo-900/50 text-indigo-300" : 
-                              aid === 'agent_creative' ? "bg-emerald-900/50 text-emerald-300" : 
-                              "bg-amber-900/50 text-amber-300"
+                              (agent.access ?? 'family_safe') === 'court_core' ? "bg-red-900/40 text-red-300" : "bg-amber-900/50 text-amber-300"
                             )}
                             title={`${agent.name} (${customAgents.find(ca => ca.id === aid) ? 'Editable' : 'Default'})`}
                           >
@@ -2279,18 +2367,18 @@ export default function App() {
                   <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] font-bold">Court Tasks</h2>
                   <div className="flex items-center gap-1">
                     <div className="px-1.5 py-0.5 bg-[#4F46E5]/10 rounded-md text-[9px] font-black text-[#4F46E5]">
-                      {tasks.filter(t => t.status !== 'completed').length} ACTIVE
+                      {visibleTasks.filter(t => t.status !== 'completed').length} ACTIVE
                     </div>
                   </div>
                 </div>
                 
                 <div className="space-y-3">
-                  {tasks.length === 0 ? (
+                  {visibleTasks.length === 0 ? (
                     <div className="p-6 border border-dashed border-[#2A2E37] rounded-2xl text-center text-[10px] text-[#6B7280] italic">
                       No active tasks delegated.
                     </div>
                   ) : (
-                    tasks.slice(0, 5).map(task => {
+                    visibleTasks.slice(0, 5).map(task => {
                       const assignee = allAgents.find(a => a.id === task.assigneeId);
                       return (
                         <div key={task.id} className="group bg-[#0F1115] border border-[#2A2E37] rounded-2xl p-4 transition-all hover:border-[#4F46E5]/40 hover:bg-[#16191F]">
@@ -2331,9 +2419,9 @@ export default function App() {
                       );
                     })
                   )}
-                  {tasks.length > 5 && (
+                  {visibleTasks.length > 5 && (
                     <button className="w-full py-2 text-[9px] font-black text-[#6B7280] uppercase tracking-widest hover:text-[#4F46E5] transition-colors">
-                      View All {tasks.length} Tasks
+                      View All {visibleTasks.length} Tasks
                     </button>
                   )}
                 </div>
@@ -2344,7 +2432,7 @@ export default function App() {
                 <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#F59E0B] font-bold mb-4">Room Pulse</h2>
                 <div className="bg-[#B45309]/10 border border-[#B45309]/30 rounded-2xl p-5 shadow-inner">
                   <div className="flex -space-x-2 mb-4">
-                    {allAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
+                    {visibleAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
                       <div key={a.id} className="w-8 h-8 rounded-full bg-[#16191F] border-2 border-[#1F2937] flex items-center justify-center text-sm overflow-hidden" title={a.name}>
                         <Avatar avatar={a.avatar} className="w-full h-full flex items-center justify-center" />
                       </div>
