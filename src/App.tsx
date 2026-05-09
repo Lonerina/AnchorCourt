@@ -195,7 +195,7 @@ export default function App() {
         const profileRef = doc(db, 'profiles', u.uid);
         setDoc(profileRef, {
           userId: u.uid,
-          displayName: u.displayName || 'Anonymous User',
+          displayName: u.displayName || 'Court Guest',
           email: u.email || '',
           photoURL: u.photoURL || ''
         }, { merge: true });
@@ -458,7 +458,7 @@ export default function App() {
         updatedAt: serverTimestamp()
       }, { merge: true });
       setShowAdminDashboard(false);
-      alert("Global Command protocols updated successfully.");
+      alert("Court protocols updated successfully.");
     } catch (error) {
       console.error("Failed to save global config:", error);
       alert("System failure: Authorization or network error.");
@@ -1022,7 +1022,7 @@ export default function App() {
               },
               {
                 name: "search_notion",
-                description: "Search Notion workspace for pages and documents based on a query.",
+                description: "Search Notion for pages and documents based on a query.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
@@ -1033,7 +1033,7 @@ export default function App() {
               },
               {
                 name: "create_notion_page",
-                description: "Create a new page in a Notion workspace.",
+                description: "Create a new page in Notion.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
@@ -1345,7 +1345,7 @@ export default function App() {
             >
               <div className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white tracking-tight">{editingAgentId ? 'Calibrate Synapse' : 'Forge Custom Agent'}</h2>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">{editingAgentId ? 'Refine Court Voice' : 'Forge Court Voice'}</h2>
                   <button onClick={() => setShowCreateAgentModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-6 h-6" />
                   </button>
@@ -1397,7 +1397,7 @@ export default function App() {
                     <input 
                       value={newAgent.name}
                       onChange={e => setNewAgent({...newAgent, name: e.target.value})}
-                      placeholder="e.g. AnchorCourt Research"
+                      placeholder="e.g. Court Archivist"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1407,7 +1407,7 @@ export default function App() {
                     <input 
                       value={newAgent.role}
                       onChange={e => setNewAgent({...newAgent, role: e.target.value})}
-                      placeholder="e.g. Data Analysis or Creative Writing"
+                      placeholder="e.g. Archive, Systems, Watch, or Structure"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1840,7 +1840,7 @@ export default function App() {
 
                 {threads.length > 0 && (
                   <div className="space-y-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Past AnchorCourt</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Past Rooms</p>
                     <div className="space-y-1">
                       {threads.map(thread => (
                         <div key={thread.id} className="group relative">
@@ -1905,13 +1905,13 @@ export default function App() {
                   className="flex-1 py-2.5 rounded-lg border border-[#374151] text-[10px] font-black uppercase tracking-widest hover:bg-[#1F2937] transition-colors mb-2 flex items-center justify-center gap-2 text-[#9CA3AF] hover:text-white"
                  >
                     <Settings className="w-3 h-3" />
-                    Settings
+                    House Settings
                  </button>
                  {isAdmin && (
                    <button 
                     onClick={() => setShowAdminDashboard(true)}
                     className="p-2.5 rounded-lg border border-amber-900/50 text-amber-500 hover:bg-amber-900/20 transition-colors mb-2 flex items-center justify-center"
-                    title="Command Center"
+                    title="Court Core"
                    >
                      <Shield className="w-4 h-4" />
                    </button>
@@ -1944,7 +1944,7 @@ export default function App() {
               </button>
             )}
             <h1 className="text-sm font-semibold text-[#F3F4F6] tracking-tight truncate max-w-[200px]">
-              {threads.find(t => t.id === activeThreadId)?.title || 'Collaboration Stream'}
+              {threads.find(t => t.id === activeThreadId)?.title || 'AnchorCourt'}
             </h1>
           </div>
           
@@ -2155,7 +2155,7 @@ export default function App() {
             <input 
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Instruct your agents..."
+              placeholder="Speak into the room..."
               className="w-full bg-[#1F2937] border border-[#374151] rounded-2xl py-4.5 px-6 pr-36 text-sm text-[#F3F4F6] focus:outline-none focus:border-[#4F46E5] focus:ring-4 focus:ring-[#4F46E5]/10 shadow-2xl transition-all placeholder:text-[#6B7280]"
             />
             <div className="absolute right-3 flex gap-2 items-center">
@@ -2341,7 +2341,7 @@ export default function App() {
 
               {/* ADHD Focus Assist */}
               <div className="pt-4">
-                <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#F59E0B] font-bold mb-4">Focus Assistant</h2>
+                <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#F59E0B] font-bold mb-4">Room Pulse</h2>
                 <div className="bg-[#B45309]/10 border border-[#B45309]/30 rounded-2xl p-5 shadow-inner">
                   <div className="flex -space-x-2 mb-4">
                     {allAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
@@ -2388,7 +2388,7 @@ export default function App() {
                        <div className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[9px] font-black text-amber-500 uppercase tracking-widest">Administrator Clearance</div>
                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                     </div>
-                    <h2 className="text-3xl font-bold text-white tracking-tight">AnchorCourt Command Center</h2>
+                    <h2 className="text-3xl font-bold text-white tracking-tight">AnchorCourt Court Core</h2>
                   </div>
                   <button onClick={() => setShowAdminDashboard(false)} className="p-3 hover:bg-[#1F2937] rounded-full transition-colors text-[#6B7280]">
                     <X className="w-8 h-8" />
