@@ -54,6 +54,61 @@ export interface PrivateMemberConfig {
   handling: AgentHandlingNotes;
 }
 
+export const SUPPORT_NEEDS: SupportNeed[] = [
+  'adhd',
+  'autism',
+  'anxiety',
+  'panic',
+  'mdd',
+  'bpd',
+  'irlen',
+  'sensory_sensitivity',
+  'learning_difficulty',
+  'chronic_illness',
+  'other'
+];
+
+export const RESPONSE_TONES: ResponseTone[] = ['gentle', 'direct', 'balanced'];
+export const RESPONSE_LENGTHS: ResponseLength[] = ['short', 'medium', 'detailed'];
+export const GUIDANCE_STYLES: GuidanceStyle[] = ['step_by_step', 'summary_first', 'adaptive'];
+
+export const FIELD_LABELS: Record<string, string> = {
+  adhd: 'ADHD',
+  autism: 'Autism',
+  anxiety: 'Anxiety',
+  panic: 'Panic',
+  mdd: 'MDD',
+  bpd: 'BPD',
+  irlen: 'Irlen',
+  sensory_sensitivity: 'Sensory sensitivity',
+  learning_difficulty: 'Learning difficulty',
+  chronic_illness: 'Chronic illness',
+  other: 'Other',
+  gentle: 'Gentle',
+  direct: 'Direct',
+  balanced: 'Balanced',
+  short: 'Short',
+  medium: 'Medium',
+  detailed: 'Detailed',
+  step_by_step: 'Step by step',
+  summary_first: 'Summary first',
+  adaptive: 'Adaptive'
+};
+
+export const FIELD_HELP: Record<string, string> = {
+  adhd: 'Prefer clarity, reduced clutter, and manageable pacing.',
+  autism: 'Prefer predictable structure and reduced ambiguity.',
+  anxiety: 'Prefer calm tone and reduced urgency pressure.',
+  panic: 'Avoid overload and escalation-heavy phrasing.',
+  mdd: 'Keep support grounded, clear, and non-performative.',
+  bpd: 'Be steady, clear, and avoid unnecessary volatility.',
+  irlen: 'Reduce visual density and sensory strain where possible.',
+  sensory_sensitivity: 'Use lower intensity formatting and pacing.',
+  learning_difficulty: 'Prefer simpler structure and clearer sequencing.',
+  chronic_illness: 'Respect energy limits, pacing, and fluctuation.',
+  other: 'Additional support needs not covered above.'
+};
+
 export const DEFAULT_MEMBER_PROFILE: PrivateMemberProfile = {
   preferredName: '',
   ageBand: '',
