@@ -430,13 +430,13 @@ export default function App() {
             memberIds: [...currentMembers, targetUser.userId],
             updatedAt: serverTimestamp()
           }, { merge: true });
-          alert(`Invited ${targetUser.displayName} to the discussion!`);
+          alert(`Invited ${targetUser.displayName} to the room!`);
         } else {
-          alert("User is already in this discussion.");
+          alert("User is already in this room.");
         }
       } else {
         // If thread doesn't exist yet, we can't invite
-        alert("Please send a message first to initialize the discussion before inviting others.");
+        alert("Please send a message first to initialize the room before inviting others.");
       }
       setInviteEmail('');
       setShowInviteModal(false);
@@ -590,7 +590,7 @@ export default function App() {
         defaultAgentIds: selectedAgentIds,
         updatedAt: serverTimestamp()
       }, { merge: true });
-      alert("Quick Summon selection saved! New discussions will now default to these agents.");
+      alert("Quick Summon selection saved! New rooms will now default to these agents.");
     } catch (error) {
       console.error("Failed to save defaults:", error);
       alert("Failed to save Quick Summon selection.");
@@ -619,7 +619,7 @@ export default function App() {
         memberIds: [user.uid],
         isGroup: true,
         title: groupName.trim(),
-        lastMessage: 'Group discussion created',
+        lastMessage: 'Shared room created',
         updatedAt: serverTimestamp()
       });
       
@@ -628,7 +628,7 @@ export default function App() {
         userId: 'system',
         senderId: 'system',
         senderType: 'agent',
-        content: `[AnchorCourt] Group discussion "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
+        content: `[AnchorCourt] Shared room "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
         timestamp: serverTimestamp()
       });
 
@@ -638,7 +638,7 @@ export default function App() {
       setSelectedAgentIds(defaultAgentIds);
     } catch (error) {
       console.error("Failed to create group:", error);
-      alert("Failed to create group discussion.");
+      alert("Failed to create shared room.");
     } finally {
       setLoading(false);
     }
@@ -1295,7 +1295,7 @@ export default function App() {
                       </div>
                       <div>
                         <h4 className="font-bold text-white">Quick Summon</h4>
-                        <p className="text-xs text-[#9CA3AF]">Agents active by default in new threads</p>
+                        <p className="text-xs text-[#9CA3AF]">Agents active by default in new rooms</p>
                       </div>
                     </div>
                     
@@ -1565,7 +1565,7 @@ export default function App() {
             >
               <form onSubmit={createGroupDiscussion} className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-white tracking-tight">New Group Project</h2>
+                  <h2 className="text-xl font-bold text-white tracking-tight">Open Shared Room</h2>
                   <button type="button" onClick={() => setShowCreateGroupModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-5 h-5" />
                   </button>
@@ -1573,15 +1573,15 @@ export default function App() {
                 
                 <div className="space-y-4">
                   <p className="text-xs text-[#9CA3AF]">
-                    Create a shared workspace where multiple users can collaborate with AI agents.
+                    Open a shared room where family and invited members can talk with Court agents together.
                   </p>
                   <div className="space-y-2">
-                    <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Discussion Name</label>
+                    <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Room Name</label>
                     <input 
                       required
                       value={groupName}
                       onChange={e => setGroupName(e.target.value)}
-                      placeholder="e.g. Q3 Roadmap Planning"
+                      placeholder="e.g. Family Room"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1593,7 +1593,7 @@ export default function App() {
                   className="w-full py-4 bg-[#4141E5] text-white rounded-xl font-bold hover:bg-[#4338CA] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
-                  {loading ? 'INITIALIZING...' : 'CREATE GROUP CHAT'}
+                  {loading ? 'OPENING...' : 'OPEN SHARED ROOM'}
                 </button>
               </form>
             </motion.div>
@@ -1617,7 +1617,7 @@ export default function App() {
             >
               <form onSubmit={inviteUserByEmail} className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-white tracking-tight">Invite to Discussion</h2>
+                  <h2 className="text-xl font-bold text-white tracking-tight">Invite to Room</h2>
                   <button type="button" onClick={() => setShowInviteModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-5 h-5" />
                   </button>
@@ -1706,7 +1706,7 @@ export default function App() {
                       <button 
                         onClick={() => setShowCreateGroupModal(true)}
                         className="w-12 h-11 flex items-center justify-center bg-[#4F46E5]/10 text-[#4F46E5] rounded-xl hover:bg-[#4F46E5]/20 transition-all border border-[#4F46E5]/30 group"
-                        title="Create Group Project"
+                        title="Open Shared Room"
                       >
                         <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
                       </button>
@@ -1856,7 +1856,7 @@ export default function App() {
                             <div className="flex items-center gap-2 mb-1">
                               {thread.isGroup ? <Users className="w-3 h-3 text-[#4F46E5]" /> : <MessageSquare className="w-3 h-3 text-[#6B7280]" />}
                               <p className="text-[11px] font-bold truncate pr-6 leading-tight flex-1">
-                                {thread.title || 'Untitled Discussion'}
+                                {thread.title || 'Untitled Room'}
                               </p>
                             </div>
                             <p className="text-[9px] text-[#6B7280] truncate leading-tight mb-1">{thread.lastMessage || 'No messages'}</p>
@@ -2063,8 +2063,8 @@ export default function App() {
                 <MessageSquare className="w-10 h-10" />
               </div>
               <div className="space-y-2">
-                <p className="text-xl font-semibold text-white">Initialize Workspace</p>
-                <p className="text-sm max-w-xs mx-auto">Your agents are ready to assist with Notion, Google Apps, and complex project planning.</p>
+                <p className="text-xl font-semibold text-white">Open the Room</p>
+                <p className="text-sm max-w-xs mx-auto">Your Court is ready. Start the conversation and call the room to life.</p>
               </div>
             </div>
           )}
@@ -2351,7 +2351,7 @@ export default function App() {
                     ))}
                   </div>
                   <p className="text-xs text-[#FBBF24]/80 leading-relaxed mb-3 italic font-medium">
-                    "Sedia membantu, Boss. We are monitoring your Notion workspace and Google apps for Malaysian context."
+                    "Sedia membantu, Boss. The room is steady, the Court is near, and we are ready when you call."
                   </p>
                   <div className="flex items-center gap-2 text-[10px] text-[#F59E0B] font-extrabold uppercase tracking-widest">
                     <Zap className="w-3 h-3" />
