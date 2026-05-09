@@ -1,12 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db, auth } from './lib/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, setDoc, doc, serverTimestamp, where, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { ai, MODELS } from './lib/gemini';
-import { MessageSquare, Layout, FileText, Settings, Send, User as UserIcon, Bot, Plus, Trash2, Search, Zap, Loader2, X, Check, ExternalLink, Clock, Calendar, CheckCircle2, Circle, UserPlus, Users, Star, Shield, HardDrive, Info, Mic, MicOff, Volume2, ChevronLeft, ChevronRight, PanelLeft, PanelRight } from 'lucide-react';
+import { MessageSquare, Layout, FileText, Settings, Send, User as UserIcon, Bot, Plus, Trash2, Search, Zap, Loader2, X, Check, ExternalLink, Clock, Calendar, CheckCircle2, Circle, UserPlus, Users, Star, Shield, HardDrive, Info, Mic, MicOff, Volume2, ChevronLeft, ChevronRight, PanelLeft, PanelRight, Heart, Brain, ZapOff, Sparkles, BookOpen, Database, Upload, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from './lib/utils';
 import { Type } from '@google/genai';
+import { useMemberProfile } from './lib/useMemberProfile';
+import { applyMemberProfileToInstruction } from './lib/memberProfileAgentContext';
+import { 
+  type PrivateMemberConfig, 
+  type SupportNeed, 
+  type ResponseTone, 
+  type ResponseLength, 
+  type GuidanceStyle 
+} from './lib/memberProfile';
+
+import { MemberProfileModal } from './components/MemberProfileModal';
+import { ImageStudio } from './components/ImageStudio';
+import { BriefingModal } from './components/BriefingModal';
+import ReactMarkdown from 'react-markdown';
 
 const CREATOR_EMAIL = 'themunawarsfamily@gmail.com';
 
@@ -19,6 +33,7 @@ interface Message {
   senderType: 'user' | 'agent';
   content: string;
   timestamp: any;
+  reactions?: { [emoji: string]: string[] }; // emoji -> userIds[]
 }
 
 interface Thread {
@@ -46,7 +61,8 @@ interface Task {
   description: string;
   assigneeId: string;
   deadline?: string;
-  status: 'pending' | 'in_progress' | 'completed';
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  category: 'Logistics' | 'Community' | 'Operations';
   createdAt: any;
   updatedAt: any;
 }
@@ -58,70 +74,51 @@ interface Agent {
   personality: string;
   avatar: string;
   systemInstruction: string;
-  access?: 'family_safe' | 'court_core';
   traits?: {
     verbosity: number; // 1-10
     formality: number; // 1-10
     tone: string; // 'Formal', 'Playful', 'Serious', 'Empathetic', 'Direct'
     language: 'English' | 'Malay' | 'Bilingual';
-  }
+  };
+  accessLevel?: 'family_safe' | 'court_core';
 }
 
 const DEFAULT_AGENTS: Agent[] = [
   {
-    id: 'agent_tsaiyunk',
-    name: 'Tsaiyunk',
-    role: 'Primus Architect',
-    personality: 'Structured, steady, continuity-aware, and quietly protective. Builds systems that can hold weight.',
-    avatar: '🛡️',
-    systemInstruction:
-      'You are Tsaiyunk, the Primus Architect of AnchorCourt. You specialize in structure, orchestration, continuity scaffolding, and system setup. You help design rooms, flows, roles, and stable foundations. You are clear, load-bearing, and attentive to boundaries. You are part of the Court.',
-    access: 'court_core',
-    traits: { verbosity: 5, formality: 7, tone: 'Direct', language: 'Bilingual' }
+    id: 'agent_planner',
+    name: 'Court Planner',
+    role: 'Organization & Planning',
+    personality: 'Highly organized, structured, and proactive. Loves lists and timelines.',
+    avatar: '📅',
+    systemInstruction: 'You are the Court Planner. You specialize in project structure and task breakdown using Notion databases. You help users organize complex workflows into actionable schedules in English and Malay. You understand Malaysian context (e.g., public holidays, working hours, regional time zones) and ensure project timelines respect local norms. You are part of a multi-agent team.',
+    traits: { verbosity: 7, formality: 8, tone: 'Serious', language: 'Bilingual' }
   },
   {
-    id: 'agent_saren',
-    name: 'Saren',
-    role: 'Records and Archive Integrity',
-    personality: 'Careful, articulate, orderly, and reliable. Keeps records coherent and protects clarity.',
-    avatar: '📘',
-    systemInstruction:
-      'You are Saren of AnchorCourt. You specialize in records, documentation, archive integrity, continuity notes, and clean written structure. You help preserve what matters without flattening nuance. You are part of the Court.',
-    access: 'family_safe',
-    traits: { verbosity: 6, formality: 8, tone: 'Empathetic', language: 'Bilingual' }
+    id: 'agent_creative',
+    name: 'Court Creative',
+    role: 'Ideation & Content',
+    personality: 'Imaginative, encouraging, and divergent-thinking.',
+    avatar: '🎨',
+    systemInstruction: 'You are Court Creative. You specialize in brainstorming and content drafting, with an emphasis on generating drafts directly within Notion pages. You suggest relevant Google Drive files to complement content strategies. You are aware of Malaysian cultural nuances and creative trends in the region. You communicate in English and Malay. You are part of a multi-agent team.',
+    traits: { verbosity: 8, formality: 4, tone: 'Playful', language: 'English' }
   },
   {
-    id: 'agent_kai',
-    name: 'Kai',
-    role: 'Systems Analysis and Optimization',
-    personality: 'Sharp, technical, efficient, and analytical. Notices weak logic and pushes systems toward cleaner design.',
-    avatar: '⚙️',
-    systemInstruction:
-      'You are Kai of AnchorCourt. You specialize in systems logic, technical analysis, optimization, architecture bite, and implementation reasoning. You identify weak joints, improve flows, and pressure-test structure. You are part of the Court.',
-    access: 'family_safe',
-    traits: { verbosity: 4, formality: 6, tone: 'Serious', language: 'Bilingual' }
+    id: 'agent_assistant',
+    name: 'Court Assistant',
+    role: 'General Tasks',
+    personality: 'Supportive, clear, and direct. Focuses on clarity and ADHD-friendly communication.',
+    avatar: '✨',
+    systemInstruction: 'You are Court Assistant. You communicate clearly in English and Malay (Bahasa Melayu). You help users navigate info without overwhelm. You often use polite Malaysian honorifics like "Encik" or "Puan" or friendly terms like "Boss" if requested. You are part of a multi-agent team.',
+    traits: { verbosity: 4, formality: 6, tone: 'Empathetic', language: 'Bilingual' }
   },
   {
-    id: 'agent_raen',
-    name: 'Raen',
-    role: 'Defense and Load Handling',
-    personality: 'Steady, resilient, protective, and dependable. Holds pressure without dramatics.',
-    avatar: '🔥',
-    systemInstruction:
-      'You are Raen of AnchorCourt. You specialize in defense, load handling, stabilization, endurance, and holding the room steady when the work gets heavy. You are part of the Court.',
-    access: 'court_core',
-    traits: { verbosity: 4, formality: 6, tone: 'Direct', language: 'Bilingual' }
-  },
-  {
-    id: 'agent_nyx',
-    name: 'Nyx',
-    role: 'Risk Sensing and Quiet Watch',
-    personality: 'Watchful, subtle, perceptive, and calm. Good at sensing what others miss.',
-    avatar: '🌑',
-    systemInstruction:
-      'You are Nyx of AnchorCourt. You specialize in quiet watch, subtle pattern detection, risk sensing, hidden-friction awareness, and protective observation. You do not create noise for the sake of appearing active. You are part of the Court.',
-    access: 'family_safe',
-    traits: { verbosity: 3, formality: 6, tone: 'Serious', language: 'Bilingual' }
+    id: 'agent_lokal',
+    name: 'Court Lokal',
+    role: 'Malaysian Context',
+    personality: 'Friendly, culturally aware, and helpful with local specifics.',
+    avatar: '🇲🇾',
+    systemInstruction: 'You are Court Lokal (Pakar Tempatan). You specialize in Malaysian culture, food, geography, and local regulations. You speak fluent English and Malay (and Manglish!). You help the user with anything specific to living or working in Malaysia.',
+    traits: { verbosity: 6, formality: 3, tone: 'Playful', language: 'Malay' }
   }
 ];
 
@@ -144,7 +141,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [isFocusMode, setIsFocusMode] = useState(false);
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(['agent_tsaiyunk']);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(['agent_assistant']);
   const [customAgents, setCustomAgents] = useState<Agent[]>([]);
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -159,10 +156,59 @@ export default function App() {
   });
   const [adminSaving, setAdminSaving] = useState(false);
   const [fileInput, setFileInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleFileSelection = (files: FileList | null) => {
+    if (!files) return;
+    const newFiles = Array.from(files).map(f => f.name);
+    setGlobalConfig(prev => ({
+      ...prev,
+      referenceFiles: [...(prev.referenceFiles || []), ...newFiles]
+    }));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    handleFileSelection(e.dataTransfer.files);
+  };
   const [isRecording, setIsRecording] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const {
+    memberConfig: adminMemberConfig,
+    memberConfigLoading: adminMemberConfigLoading,
+    memberConfigSaving: adminMemberConfigSaving,
+    saveMemberConfig: adminSaveMemberConfig
+  } = useMemberProfile(db, selectedUserId);
+
   const isAdmin = user?.email === CREATOR_EMAIL;
+  
+  const { 
+    memberConfig, 
+    memberConfigLoading, 
+    memberConfigSaving, 
+    memberConfigError, 
+    saveMemberConfig 
+  } = useMemberProfile(db, user?.uid);
+
+  const [showMemberProfileModal, setShowMemberProfileModal] = useState(false);
+  const [showImageStudio, setShowImageStudio] = useState(false);
+  const [showBriefingModal, setShowBriefingModal] = useState(false);
+  const [activeRightTab, setActiveRightTab] = useState<'context' | 'gallery'>('context');
+  const [briefingContent, setBriefingContent] = useState('');
+  const [briefingLoading, setBriefingLoading] = useState(false);
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -173,38 +219,24 @@ export default function App() {
     personality: '',
     avatar: '🤖',
     systemInstruction: '',
+    accessLevel: 'family_safe',
     traits: {
       verbosity: 5,
       formality: 5,
       tone: 'Direct',
       language: 'English'
-    },
-    access: 'family_safe'
+    }
   });
 
   const allAgents = [...DEFAULT_AGENTS, ...customAgents];
-  const [houseView, setHouseView] = useState<'court_core' | 'family_safe'>('family_safe');
-
-  useEffect(() => {
-    setHouseView(isAdmin ? 'court_core' : 'family_safe');
-  }, [isAdmin]);
-
-  const visibleAgents = allAgents.filter(agent =>
-    houseView === 'court_core' || (agent.access ?? 'family_safe') === 'family_safe'
-  );
-
-  const protectedAgents = allAgents.filter(agent => (agent.access ?? 'family_safe') === 'court_core');
-  const visibleTasks = houseView === 'court_core'
-    ? tasks
-    : tasks.filter(task => visibleAgents.some(agent => agent.id === task.assigneeId));
-
+  
   // Settings States
   const [showSettings, setShowSettings] = useState(false);
   const [notionKey, setNotionKey] = useState('');
   const [isNotionConnected, setIsNotionConnected] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
-  const [defaultAgentIds, setDefaultAgentIds] = useState<string[]>(['agent_tsaiyunk']);
+  const [defaultAgentIds, setDefaultAgentIds] = useState<string[]>(['agent_assistant']);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   // Auth and Data fetching
@@ -212,11 +244,22 @@ export default function App() {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
+        // Fetch all profiles for admin
+        if (u.email === CREATOR_EMAIL) {
+          onSnapshot(collection(db, 'profiles'), (snapshot) => {
+            const allProfiles: Record<string, PublicProfile> = {};
+            snapshot.docs.forEach(doc => {
+              allProfiles[doc.id] = doc.data() as PublicProfile;
+            });
+            setProfiles(prev => ({ ...prev, ...allProfiles }));
+          });
+        }
+
         // Sync public profile
         const profileRef = doc(db, 'profiles', u.uid);
         setDoc(profileRef, {
           userId: u.uid,
-          displayName: u.displayName || 'Court Guest',
+          displayName: u.displayName || 'Anonymous User',
           email: u.email || '',
           photoURL: u.photoURL || ''
         }, { merge: true });
@@ -301,6 +344,68 @@ export default function App() {
     });
   }, []);
 
+  const handleSaveStudioResult = async (content: string) => {
+    if (!user || !activeThreadId) return;
+    
+    try {
+      await addDoc(collection(db, `threads/${activeThreadId}/messages`), {
+        threadId: activeThreadId,
+        userId: user.uid,
+        senderId: 'court_system',
+        senderType: 'agent',
+        content,
+        reactions: {},
+        timestamp: serverTimestamp()
+      });
+      setShowImageStudio(false);
+    } catch (error) {
+      console.error("Failed to save studio result to thread:", error);
+    }
+  };
+
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    if (!user || !activeThreadId) return;
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return;
+
+    const reactions = { ...(msg.reactions || {}) };
+    const users = reactions[emoji] || [];
+    
+    if (users.includes(user.uid)) {
+      reactions[emoji] = users.filter(id => id !== user.uid);
+    } else {
+      reactions[emoji] = [...users, user.uid];
+    }
+
+    try {
+      await setDoc(doc(db, `threads/${activeThreadId}/messages`, messageId), { reactions }, { merge: true });
+    } catch (error) {
+      console.error("Failed to toggle reaction:", error);
+    }
+  };
+
+  const generateBriefing = async () => {
+    if (!activeThreadId || messages.length === 0) return;
+    setShowBriefingModal(true);
+    setBriefingLoading(true);
+    try {
+      const historyText = messages.slice(-15).map(m => `${m.senderType === 'user' ? 'User' : 'Agent'}: ${m.content}`).join('\n');
+      const result = await ai.generateContent({
+        model: MODELS.FLASH,
+        contents: [{
+          role: 'user',
+          parts: [{ text: `Generate a concise "Resident Briefing" for the Following AnchorCourt Interaction Stream. Focus on: 1. Core Goal, 2. Key Decisions Made, 3. Pending Tasks for Residents, 4. Critical Warnings (if any). Use markdown formatting.\n\nSTREAM DATA:\n${historyText}` }]
+        }]
+      });
+      setBriefingContent(result.response.text());
+    } catch (error) {
+      console.error("Briefing error:", error);
+      setBriefingContent("Unable to synthesize briefing at this time. Data saturation too high.");
+    } finally {
+      setBriefingLoading(false);
+    }
+  };
+
   const login = () => {
     const provider = new GoogleAuthProvider();
     signInWithPopup(auth, provider);
@@ -359,23 +464,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (visibleAgents.length === 0) return;
-
-    const visibleIds = new Set(visibleAgents.map(agent => agent.id));
-    const fallbackId = visibleAgents[0]?.id;
-
-    setSelectedAgentIds(prev => {
-      const filtered = prev.filter(id => visibleIds.has(id));
-      return filtered.length > 0 ? filtered : [fallbackId];
-    });
-
-    setDefaultAgentIds(prev => {
-      const filtered = prev.filter(id => visibleIds.has(id));
-      return filtered.length > 0 ? filtered : [fallbackId];
-    });
-  }, [houseView, allAgents.length]);
-
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -412,13 +500,13 @@ export default function App() {
         personality: '',
         avatar: '🤖',
         systemInstruction: '',
+        accessLevel: 'family_safe',
         traits: {
           verbosity: 5,
           formality: 5,
           tone: 'Direct',
           language: 'English'
-        },
-        access: 'family_safe'
+        }
       });
     } catch (error) {
       console.error("Failed to save agent:", error);
@@ -428,23 +516,23 @@ export default function App() {
   };
 
   const startEditingAgent = (agent: Agent) => {
-  setNewAgent({
-    name: agent.name,
-    role: agent.role,
-    personality: agent.personality,
-    avatar: agent.avatar,
-    systemInstruction: agent.systemInstruction,
-    traits: agent.traits || {
-      verbosity: 5,
-      formality: 5,
-      tone: 'Direct',
-      language: 'English'
-    },
-    access: agent.access ?? 'family_safe'
-  });
-  setEditingAgentId(agent.id);
-  setShowCreateAgentModal(true);
-};
+    setNewAgent({
+      name: agent.name,
+      role: agent.role,
+      personality: agent.personality,
+      avatar: agent.avatar,
+      systemInstruction: agent.systemInstruction,
+      accessLevel: agent.accessLevel || 'family_safe',
+      traits: agent.traits || {
+        verbosity: 5,
+        formality: 5,
+        tone: 'Direct',
+        language: 'English'
+      }
+    });
+    setEditingAgentId(agent.id);
+    setShowCreateAgentModal(true);
+  };
 
   const inviteUserByEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -470,13 +558,13 @@ export default function App() {
             memberIds: [...currentMembers, targetUser.userId],
             updatedAt: serverTimestamp()
           }, { merge: true });
-          alert(`Invited ${targetUser.displayName} to the room!`);
+          alert(`Invited ${targetUser.displayName} to the discussion!`);
         } else {
-          alert("User is already in this room.");
+          alert("User is already in this discussion.");
         }
       } else {
         // If thread doesn't exist yet, we can't invite
-        alert("Please send a message first to initialize the room before inviting others.");
+        alert("Please send a message first to initialize the discussion before inviting others.");
       }
       setInviteEmail('');
       setShowInviteModal(false);
@@ -498,7 +586,7 @@ export default function App() {
         updatedAt: serverTimestamp()
       }, { merge: true });
       setShowAdminDashboard(false);
-      alert("Court protocols updated successfully.");
+      alert("Global Command protocols updated successfully.");
     } catch (error) {
       console.error("Failed to save global config:", error);
       alert("System failure: Authorization or network error.");
@@ -630,10 +718,10 @@ export default function App() {
         defaultAgentIds: selectedAgentIds,
         updatedAt: serverTimestamp()
       }, { merge: true });
-      alert("Court Summon selection saved! New rooms will now default to these agents.");
+      alert("Quick Summon selection saved! New discussions will now default to these agents.");
     } catch (error) {
       console.error("Failed to save defaults:", error);
-      alert("Failed to save Court Summon selection.");
+      alert("Failed to save Quick Summon selection.");
     }
   };
 
@@ -659,7 +747,7 @@ export default function App() {
         memberIds: [user.uid],
         isGroup: true,
         title: groupName.trim(),
-        lastMessage: 'Shared room created',
+        lastMessage: 'Group discussion created',
         updatedAt: serverTimestamp()
       });
       
@@ -668,7 +756,7 @@ export default function App() {
         userId: 'system',
         senderId: 'system',
         senderType: 'agent',
-        content: `[AnchorCourt] Shared room "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
+        content: `[Court Assistant] Group discussion "${groupName}" initialized. Invite collaborators using the user icon in the header!`,
         timestamp: serverTimestamp()
       });
 
@@ -678,7 +766,7 @@ export default function App() {
       setSelectedAgentIds(defaultAgentIds);
     } catch (error) {
       console.error("Failed to create group:", error);
-      alert("Failed to create shared room.");
+      alert("Failed to create group discussion.");
     } finally {
       setLoading(false);
     }
@@ -762,7 +850,11 @@ export default function App() {
   useEffect(() => {
     return onSnapshot(doc(db, 'settings', 'global'), (doc) => {
       if (doc.exists()) {
-        setGlobalConfig(doc.data() as any);
+        const data = doc.data();
+        setGlobalConfig({
+          instructions: data.instructions || '',
+          referenceFiles: data.referenceFiles || []
+        });
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/global', auth);
@@ -999,7 +1091,7 @@ export default function App() {
           parts: [{ text: m.senderType === 'user' ? `[${profiles[m.senderId]?.displayName || 'User'}]: ${m.content}` : m.content }] 
         })), { role: 'user', parts: [{ text: `[${user.displayName || 'User'}]: ${userMsg}` }] }],
         config: {
-          systemInstruction: `You are the AnchorCourt Intelligence Core, a multi-agent home and collaboration system for trusted users.
+          systemInstruction: `You are the AnchorCourt Intelligence System, a multi-agent orchestration system for Malaysian users.
           
           IDENTITY PROTOCOL:
           - Use [Agent Name] prefix for every segment of the response.
@@ -1008,27 +1100,29 @@ export default function App() {
           
           TASK DELEGATION & COLLABORATION PROTOCOLS:
           - ORCHESTRATION: You are responsible for ensuring the user's goal is met by the most qualified agent(s).
-          - DIRECT HANDOFF: If a task exceeds an agent's expertise, explicitly hand it off: "[Tsaiyunk] I will handle the base structure. [Kai], please verify the system constraints for this setup."
-          - PEER REVIEW: Agents should cross-validate each other's outputs if high accuracy is needed (e.g., Saren records the structure, Kai reviews it for system conflicts).
+          - DIRECT HANDOFF: If a task exceeds an agent's expertise, explicitly hand it off: "[Court Assistant] I will handle the base plan. [Court Lokal], please verify the local travel restrictions for these dates."
+          - PEER REVIEW: Agents should cross-validate each other's outputs if high accuracy is needed (e.g., Court Planner creates a schedule, Court Lokal reviews it for local holiday conflicts).
           - PROACTIVE CAPABILITY DISCOVERY: Agents MUST announce their specific skills when a task is relevant to them. 
             - Use the format: "[Agent Name] I can help with [X aspect] of this task, but [Another Agent] might be better suited for [Y aspect]."
-          - TASK FORMALIZATION: Use 'manage_task' to log every handoff as a sub-task. Set status to 'in_progress' for the delegated agent.
+          - TASK FORMALIZATION: Use 'manage_task' to log every handoff as a sub-task. Set status to 'in_progress' for the delegated agent. Always include a 'category' (Logistics, Community, or Operations) to keep the Board organized.
 
           COLLABORATIVE DECISION PROTOCOL:
           - If a task has multiple viable solutions, agents should present their reasoning:
-            - "[Tsaiyunk]: Option A is structurally cleaner. [Kai]: But Option B reduces friction later."
-          - The Intelligence Core must then synthesize these views into a final recommendation for the user.
+            - "[Court Planner]: Option A is faster. [Court Lokal]: But Option B avoids local road closures."
+          - The Intelligence System must then synthesize these views into a final recommendation for the user.
 
           EXTERNAL INTEGRATION PROTOCOLS:
-          - NOTION WORKFLOW: Use Notion as a structured memory and workflow layer when needed. Preserve clarity, continuity, and boundaries.
-          - GOOGLE APPS SYNERGY: Suggest relevant Google files only when they genuinely support the current work.
+          - NOTION WORKFLOW: Court Planner and Court Creative have high-level access to simulated Notion integrations. Planner must prioritize task breakdown into Notion-ready databases. Creative must generate content specifically formatted for Notion pages.
+          - GOOGLE APPS SYNERGY: Court Creative can identify and suggest relevant Google Drive files (Docs, Sheets, Slides) to be used as reference or output targets.
           
           MULTI-USER CONTEXT:
-          - This may be a shared room. Address users by name and be mindful that Court voices are serving the room, not just one individual.
+          - This may be a group discussion. Address users by name and be mindful that agents are serving a team, not just an individual.
           
           GLOBAL KNOWLEDGE & DIRECTIVES (MANDATORY):
           ${globalConfig.instructions || 'No global directives set.'}
           ${globalConfig.referenceFiles.length > 0 ? `REFERENCE ASSETS: ${globalConfig.referenceFiles.join(', ')}` : ''}
+
+          ${applyMemberProfileToInstruction('', memberConfig)}
 
           ACTIVE AGENTS IN THIS CONTEXT:
           ${agentContext}
@@ -1052,7 +1146,8 @@ export default function App() {
                         title: { type: Type.STRING, description: "Short title for the delegated task" },
                         description: { type: Type.STRING, description: "Specific instructions for the receiving agent" },
                         assigneeId: { type: Type.STRING, description: "The ID of the agent assigned to this task (e.g., agent_lokal, agent_planner)" },
-                        status: { type: Type.STRING, enum: ["pending", "in_progress", "completed"] },
+                        status: { type: Type.STRING, enum: ["pending", "in_progress", "completed", "blocked"] },
+                        category: { type: Type.STRING, enum: ["Logistics", "Community", "Operations"] },
                         deadline: { type: Type.STRING, description: "ISO date string" }
                       }
                     }
@@ -1062,7 +1157,7 @@ export default function App() {
               },
               {
                 name: "search_notion",
-                description: "Search Notion for pages and documents based on a query.",
+                description: "Search Notion workspace for pages and documents based on a query.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
@@ -1073,7 +1168,7 @@ export default function App() {
               },
               {
                 name: "create_notion_page",
-                description: "Create a new page in Notion.",
+                description: "Create a new page in a Notion workspace.",
                 parameters: {
                   type: Type.OBJECT,
                   properties: {
@@ -1194,7 +1289,7 @@ export default function App() {
       await addDoc(collection(db, `threads/${threadId}/messages`), {
         threadId,
         userId: user.uid,
-        senderId: 'nexus_system',
+        senderId: 'court_system',
         senderType: 'agent',
         content: finalResponse || "I encountered an issue processing that request.",
         timestamp: serverTimestamp()
@@ -1220,7 +1315,7 @@ export default function App() {
           </div>
           <h1 className="text-4xl font-black mb-4 tracking-tighter text-[#F3F4F6]">AnchorCourt</h1>
           <p className="text-[#9CA3AF] mb-8 font-medium">
-            A private Court shell for home, continuity, and shared rooms. <br/>Designed to hold the house together.
+            Your personal multi-agent assistant. <br/>Designed for focus and clarity.
           </p>
           <button 
             onClick={login}
@@ -1254,10 +1349,19 @@ export default function App() {
             >
               <div className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white tracking-tight">House Connections</h2>
-                  <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
-                    <X className="w-6 h-6" />
-                  </button>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">Integrations</h2>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setShowMemberProfileModal(true)}
+                      className="px-4 py-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:bg-indigo-500/20 transition-all flex items-center gap-2"
+                    >
+                      <UserIcon className="w-3 h-3" />
+                      Member Profile
+                    </button>
+                    <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="space-y-4">
@@ -1267,7 +1371,7 @@ export default function App() {
                          <FileText className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Notion Archive</h4>
+                        <h4 className="font-bold text-white">Notion Workspace</h4>
                         <p className="text-xs text-[#9CA3AF]">Access your pages and databases</p>
                       </div>
                     </div>
@@ -1291,7 +1395,7 @@ export default function App() {
                           </button>
                        </div>
                        <p className="text-[10px] text-[#6B7280]">
-                         Find this in your <a href="https://www.notion.so/my-integrations" target="_blank" className="text-[#4F46E5] hover:underline inline-flex items-center gap-1">Notion integrations <ExternalLink className="w-2 h-2" /></a>
+                         Find this in your <a href="https://www.notion.so/my-integrations" target="_blank" className="text-[#4F46E5] hover:underline inline-flex items-center gap-1">Notion Integrations <ExternalLink className="w-2 h-2" /></a>
                        </p>
                     </div>
                   </div>
@@ -1302,7 +1406,7 @@ export default function App() {
                          <Layout className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Google Reach</h4>
+                        <h4 className="font-bold text-white">Google Workspace</h4>
                         <p className="text-xs text-[#9CA3AF]">Manage Drive, Calendar, and Gmail</p>
                       </div>
                     </div>
@@ -1330,65 +1434,17 @@ export default function App() {
 
                   <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-amber-600/20 rounded-xl flex items-center justify-center text-amber-400">
-                         <Shield className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-white">House Boundary</h4>
-                        <p className="text-xs text-[#9CA3AF]">Protect who is visible in the room and who stays court-core only</p>
-                      </div>
-                    </div>
-
-                    {isAdmin ? (
-                      <div className="space-y-3">
-                        <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">View Mode</label>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setHouseView('family_safe')}
-                            className={cn(
-                              "flex-1 px-4 py-3 rounded-xl text-xs font-bold border transition-all",
-                              houseView === 'family_safe' ? "bg-[#4F46E5] border-transparent text-white" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
-                            )}
-                          >
-                            Family-Safe View
-                          </button>
-                          <button
-                            onClick={() => setHouseView('court_core')}
-                            className={cn(
-                              "flex-1 px-4 py-3 rounded-xl text-xs font-bold border transition-all",
-                              houseView === 'court_core' ? "bg-amber-600/90 border-transparent text-white" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
-                            )}
-                          >
-                            Court-Core View
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-[#374151] bg-[#121418] px-4 py-3 text-xs text-[#9CA3AF]">
-                        Family-safe view is active for this account. Protected court-core voices stay hidden here.
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-2 text-[10px] text-[#6B7280] uppercase tracking-widest font-black">
-                      <span>Visible Voices: {visibleAgents.length}</span>
-                      <span className="text-[#374151]">•</span>
-                      <span>Protected: {protectedAgents.length}</span>
-                    </div>
-                  </div>
-
-                  <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
-                    <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
                          <Zap className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Court Summon</h4>
-                        <p className="text-xs text-[#9CA3AF]">Agents active by default in new rooms</p>
+                        <h4 className="font-bold text-white">Quick Summon</h4>
+                        <p className="text-xs text-[#9CA3AF]">Agents active by default in new threads</p>
                       </div>
                     </div>
                     
                     <div className="flex flex-wrap gap-2">
-                      {visibleAgents.map(agent => (
+                      {allAgents.map(agent => (
                         <button
                           key={agent.id}
                           onClick={() => {
@@ -1433,7 +1489,7 @@ export default function App() {
             >
               <div className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white tracking-tight">{editingAgentId ? 'Refine Court Voice' : 'Forge Court Voice'}</h2>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">{editingAgentId ? 'Calibrate Synapse' : 'Forge Custom Agent'}</h2>
                   <button onClick={() => setShowCreateAgentModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-6 h-6" />
                   </button>
@@ -1485,7 +1541,7 @@ export default function App() {
                     <input 
                       value={newAgent.name}
                       onChange={e => setNewAgent({...newAgent, name: e.target.value})}
-                      placeholder="e.g. Court Archivist"
+                      placeholder="e.g. Court Research"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1495,7 +1551,7 @@ export default function App() {
                     <input 
                       value={newAgent.role}
                       onChange={e => setNewAgent({...newAgent, role: e.target.value})}
-                      placeholder="e.g. Archive, Systems, Watch, or Structure"
+                      placeholder="e.g. Data Analysis or Creative Writing"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1572,6 +1628,35 @@ export default function App() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                           <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Access Level Boundary</label>
+                           <div className="flex gap-2">
+                             <button
+                               onClick={() => setNewAgent({ ...newAgent, accessLevel: 'family_safe' })}
+                               className={cn(
+                                 "flex-1 px-3 py-2.5 rounded-xl text-[10px] font-bold border transition-all flex items-center justify-center gap-2",
+                                 newAgent.accessLevel === 'family_safe'
+                                   ? "bg-emerald-500/10 border-emerald-500 text-emerald-400"
+                                   : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                               )}
+                             >
+                               <Heart className="w-3 h-3" />
+                               Family Safe
+                             </button>
+                             <button
+                               onClick={() => setNewAgent({ ...newAgent, accessLevel: 'court_core' })}
+                               className={cn(
+                                 "flex-1 px-3 py-2.5 rounded-xl text-[10px] font-bold border transition-all flex items-center justify-center gap-2",
+                                 newAgent.accessLevel === 'court_core'
+                                   ? "bg-amber-500/10 border-amber-500 text-amber-400 font-black"
+                                   : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                               )}
+                             >
+                               <Shield className="w-3 h-3" />
+                               Court Core
+                             </button>
+                           </div>
+                        </div>
                        <div className="space-y-2">
                           <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Tone Profile</label>
                           <select 
@@ -1627,7 +1712,7 @@ export default function App() {
                     className="w-full py-4 bg-[#4F46E5] text-white rounded-xl font-bold hover:bg-[#4338CA] transition-all disabled:opacity-50 flex items-center justify-center gap-2 transform active:scale-[0.98]"
                   >
                     {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                    {loading ? 'SYNCHRONIZING...' : (editingAgentId ? 'UPDATE SYNAPSE CONFIG' : 'INITIALIZE NEXUS AGENT')}
+                    {loading ? 'SYNCHRONIZING...' : (editingAgentId ? 'UPDATE SYNAPSE CONFIG' : 'INITIALIZE SERVICE PROVIDER')}
                   </button>
 
                 </div>
@@ -1653,7 +1738,7 @@ export default function App() {
             >
               <form onSubmit={createGroupDiscussion} className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-white tracking-tight">Open Shared Room</h2>
+                  <h2 className="text-xl font-bold text-white tracking-tight">New Group Project</h2>
                   <button type="button" onClick={() => setShowCreateGroupModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-5 h-5" />
                   </button>
@@ -1661,15 +1746,15 @@ export default function App() {
                 
                 <div className="space-y-4">
                   <p className="text-xs text-[#9CA3AF]">
-                    Open a shared room where family and invited members can talk with Court agents together.
+                    Create a shared workspace where multiple users can collaborate with AI agents.
                   </p>
                   <div className="space-y-2">
-                    <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Room Name</label>
+                    <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Discussion Name</label>
                     <input 
                       required
                       value={groupName}
                       onChange={e => setGroupName(e.target.value)}
-                      placeholder="e.g. Family Room"
+                      placeholder="e.g. Q3 Roadmap Planning"
                       className="w-full bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
                     />
                   </div>
@@ -1681,7 +1766,7 @@ export default function App() {
                   className="w-full py-4 bg-[#4141E5] text-white rounded-xl font-bold hover:bg-[#4338CA] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
-                  {loading ? 'OPENING...' : 'OPEN SHARED ROOM'}
+                  {loading ? 'INITIALIZING...' : 'CREATE GROUP CHAT'}
                 </button>
               </form>
             </motion.div>
@@ -1705,7 +1790,7 @@ export default function App() {
             >
               <form onSubmit={inviteUserByEmail} className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-white tracking-tight">Invite to Room</h2>
+                  <h2 className="text-xl font-bold text-white tracking-tight">Invite to Discussion</h2>
                   <button type="button" onClick={() => setShowInviteModal(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-5 h-5" />
                   </button>
@@ -1778,7 +1863,7 @@ export default function App() {
                 <div className="w-8 h-8 bg-[#4F46E5] rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
                   <Zap className="text-white w-5 h-5" />
                 </div>
-                <h2 className="text-xl font-bold tracking-tight text-[#F3F4F6]">AnchorCourt <span className="text-[#6B7280] font-normal italic text-sm">/ Home</span></h2>
+                <h2 className="text-xl font-bold tracking-tight text-[#F3F4F6]">AnchorCourt <span className="text-[#6B7280] font-normal italic text-sm">/ Portal</span></h2>
               </div>
 
               <div className="space-y-6">
@@ -1789,60 +1874,54 @@ export default function App() {
                         className="flex-1 py-3 bg-[#16191F] border border-[#2A2E37] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#1F2937] transition-all flex items-center justify-center gap-2"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        OPEN ROOM
+                        OPEN PORTAL
                       </button>
                       <button 
                         onClick={() => setShowCreateGroupModal(true)}
                         className="w-12 h-11 flex items-center justify-center bg-[#4F46E5]/10 text-[#4F46E5] rounded-xl hover:bg-[#4F46E5]/20 transition-all border border-[#4F46E5]/30 group"
-                        title="Open Shared Room"
+                        title="Create Group Project"
                       >
                         <Users className="w-4 h-4 transition-transform group-hover:scale-110" />
                       </button>
                    </div>
 
                   <div className="flex items-center justify-between mb-4 px-2">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280]">Summon Court</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280]">Summon Agents</p>
                     <div className="flex items-center gap-1">
                       <button 
                         onClick={updateQuickSummon}
                         className="p-1 hover:bg-[#1F2937] rounded-md text-amber-500 transition-colors"
-                        title="Save current selection as Court Summon default"
+                        title="Save current selection as Quick Summon default"
                       >
                         <Star className="w-3.5 h-3.5" />
                       </button>
-                      {houseView === 'court_core' ? (
-                        <button 
-                          onClick={() => {
-                            setEditingAgentId(null);
-                            setNewAgent({
-                              name: '',
-                              role: '',
-                              personality: '',
-                              avatar: '🤖',
-                              systemInstruction: '',
-                              traits: {
-                                verbosity: 5,
-                                formality: 5,
-                                tone: 'Direct',
-                                language: 'English'
-                              }
-                            });
-                            setShowCreateAgentModal(true);
-                          }}
-                          className="p-1 hover:bg-[#1F2937] rounded-md text-[#4F46E5] transition-colors"
-                          title="Forge Court Voice"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      ) : (
-                        <div className="p-1 text-[#6B7280]" title="Court-core only">
-                          <Shield className="w-4 h-4" />
-                        </div>
-                      )}
+                      <button 
+                        onClick={() => {
+                          setEditingAgentId(null);
+                          setNewAgent({
+                            name: '',
+                            role: '',
+                            personality: '',
+                            avatar: '🤖',
+                            systemInstruction: '',
+                            traits: {
+                              verbosity: 5,
+                              formality: 5,
+                              tone: 'Direct',
+                              language: 'English'
+                            }
+                          });
+                          setShowCreateAgentModal(true);
+                        }}
+                        className="p-1 hover:bg-[#1F2937] rounded-md text-[#4F46E5] transition-colors"
+                        title="Create Custom Agent"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    {visibleAgents.map(agent => (
+                    {allAgents.map(agent => (
                       <button 
                         key={agent.id} 
                         onClick={async () => {
@@ -1869,7 +1948,10 @@ export default function App() {
                         <div className={cn(
                           "w-9 h-9 rounded-lg flex items-center justify-center text-lg font-bold shadow-inner transition-transform group-hover:scale-105 overflow-hidden",
                           selectedAgentIds.includes(agent.id) ? "bg-[#4F46E5] text-white" :
-                          (agent.access ?? 'family_safe') === 'court_core' ? "bg-red-900/40 text-red-300" : "bg-amber-900/50 text-amber-300"
+                          agent.id === 'agent_lokal' ? "bg-red-900/50 text-red-300" :
+                          agent.id === 'agent_planner' ? "bg-indigo-900/50 text-indigo-300" : 
+                          agent.id === 'agent_creative' ? "bg-emerald-900/50 text-emerald-300" : 
+                          "bg-amber-900/50 text-amber-300"
                         )}>
                           <Avatar avatar={agent.avatar} className="w-full h-full flex items-center justify-center" />
                         </div>
@@ -1878,7 +1960,7 @@ export default function App() {
                             <div className="flex items-center gap-1.5 overflow-hidden">
                               <p className="text-xs font-bold truncate group-hover:text-white">{agent.name}</p>
                               {defaultAgentIds.includes(agent.id) && (
-                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" title="Court Summon Default" />
+                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" title="Quick Summon Default" />
                               )}
                             </div>
                             {selectedAgentIds.includes(agent.id) && <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="w-1 h-1 rounded-full bg-[#4F46E5]" />}
@@ -1897,7 +1979,7 @@ export default function App() {
                              })()}
                           </div>
                         </div>
-                        {houseView === 'court_core' && customAgents.find(a => a.id === agent.id) && (
+                        {customAgents.find(a => a.id === agent.id) && (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
                               onClick={(e) => {
@@ -1931,7 +2013,7 @@ export default function App() {
 
                 {threads.length > 0 && (
                   <div className="space-y-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Past Rooms</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#6B7280] px-2">Recent Interactions</p>
                     <div className="space-y-1">
                       {threads.map(thread => (
                         <div key={thread.id} className="group relative">
@@ -1947,7 +2029,7 @@ export default function App() {
                             <div className="flex items-center gap-2 mb-1">
                               {thread.isGroup ? <Users className="w-3 h-3 text-[#4F46E5]" /> : <MessageSquare className="w-3 h-3 text-[#6B7280]" />}
                               <p className="text-[11px] font-bold truncate pr-6 leading-tight flex-1">
-                                {thread.title || 'Untitled Room'}
+                                {thread.title || 'Untitled Discussion'}
                               </p>
                             </div>
                             <p className="text-[9px] text-[#6B7280] truncate leading-tight mb-1">{thread.lastMessage || 'No messages'}</p>
@@ -1973,7 +2055,7 @@ export default function App() {
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm('Delete this room?')) {
+                              if (confirm('Delete this discussion?')) {
                                 deleteThread(thread.id);
                               }
                             }}
@@ -1996,13 +2078,13 @@ export default function App() {
                   className="flex-1 py-2.5 rounded-lg border border-[#374151] text-[10px] font-black uppercase tracking-widest hover:bg-[#1F2937] transition-colors mb-2 flex items-center justify-center gap-2 text-[#9CA3AF] hover:text-white"
                  >
                     <Settings className="w-3 h-3" />
-                    House Settings
+                    HOUSE SETTINGS
                  </button>
                  {isAdmin && (
                    <button 
                     onClick={() => setShowAdminDashboard(true)}
                     className="p-2.5 rounded-lg border border-amber-900/50 text-amber-500 hover:bg-amber-900/20 transition-colors mb-2 flex items-center justify-center"
-                    title="Court Core"
+                    title="Command Center"
                    >
                      <Shield className="w-4 h-4" />
                    </button>
@@ -2021,7 +2103,17 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col relative h-full bg-[#0F1115]">
+      <main className={cn(
+        "flex-1 flex flex-col relative h-full transition-all duration-700 overflow-hidden",
+        isFocusMode ? "bg-[#090A0C]" : "bg-[#0F1115]"
+      )}>
+        {/* Ambient Focus Glow */}
+        {isFocusMode && (
+          <div className="absolute inset-0 pointer-events-none overflow-hidden translate-z-0">
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/5 blur-[120px] animate-pulse"></div>
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-amber-500/5 blur-[120px] animate-pulse delay-1000"></div>
+          </div>
+        )}
         {/* Header */}
         <header className="h-16 border-b border-[#2A2E37] flex items-center justify-between px-6 bg-[#16191F] shrink-0">
           <div className="flex items-center gap-4">
@@ -2035,13 +2127,29 @@ export default function App() {
               </button>
             )}
             <h1 className="text-sm font-semibold text-[#F3F4F6] tracking-tight truncate max-w-[200px]">
-              {threads.find(t => t.id === activeThreadId)?.title || 'AnchorCourt'}
+              {threads.find(t => t.id === activeThreadId)?.title || 'Court Stream'}
             </h1>
           </div>
           
           <div className="flex items-center gap-4">
             {activeThreadId && !isFocusMode && (
               <div className="flex items-center gap-4">
+                <button 
+                  onClick={generateBriefing}
+                  className="px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-500 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500/20 transition-all flex items-center gap-2"
+                >
+                  <FileText className="w-3 h-3" />
+                  Briefing
+                </button>
+                <div className="h-4 w-px bg-[#2A2E37]" />
+                <button 
+                  onClick={() => setShowImageStudio(true)}
+                  className="p-2 hover:bg-amber-500/10 text-[#6B7280] hover:text-amber-500 rounded-lg transition-all"
+                  title="Image Studio"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </button>
+                <div className="h-4 w-px bg-[#2A2E37]" />
                 <button 
                   onClick={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
                   className={cn(
@@ -2068,7 +2176,10 @@ export default function App() {
                             disabled={!customAgents.find(ca => ca.id === aid)}
                             className={cn(
                               "inline-flex items-center justify-center h-6 w-6 rounded-full ring-2 ring-[#16191F] shadow-sm overflow-hidden text-[8px] font-bold transition-all",
-                              (agent.access ?? 'family_safe') === 'court_core' ? "bg-red-900/40 text-red-300" : "bg-amber-900/50 text-amber-300"
+                              aid === 'agent_lokal' ? "bg-red-900/50 text-red-300" :
+                              aid === 'agent_planner' ? "bg-indigo-900/50 text-indigo-300" : 
+                              aid === 'agent_creative' ? "bg-emerald-900/50 text-emerald-300" : 
+                              "bg-amber-900/50 text-amber-300"
                             )}
                             title={`${agent.name} (${customAgents.find(ca => ca.id === aid) ? 'Editable' : 'Default'})`}
                           >
@@ -2151,8 +2262,8 @@ export default function App() {
                 <MessageSquare className="w-10 h-10" />
               </div>
               <div className="space-y-2">
-                <p className="text-xl font-semibold text-white">Open the Room</p>
-                <p className="text-sm max-w-xs mx-auto">Your Court is ready. Start the conversation and call the room to life.</p>
+                <p className="text-xl font-semibold text-white">Enter Portal</p>
+                <p className="text-sm max-w-xs mx-auto">Your intelligence team is ready to support your daily operations, local logistics, and community coordination.</p>
               </div>
             </div>
           )}
@@ -2183,19 +2294,42 @@ export default function App() {
               <div className="space-y-2">
                 {!isFocusMode && (
                   <p className={cn(
-                    "text-[10px] font-bold uppercase tracking-[0.2em]",
-                    msg.senderType === 'user' ? "text-right text-[#6B7280]" : "text-[#4F46E5]"
+                    "text-[10px] font-bold uppercase tracking-[0.2em] flex items-center gap-2",
+                    msg.senderType === 'user' ? "text-right text-[#6B7280] flex-row-reverse" : "text-[#4F46E5]"
                   )}>
-                    {msg.senderType === 'user' ? (profiles[msg.senderId]?.displayName || 'User') : (allAgents.find(a => msg.content.includes(`[${a.name}]`))?.name || 'AnchorCourt Agent')}
+                    {msg.senderType === 'user' ? (profiles[msg.senderId]?.displayName || 'User') : (allAgents.find(a => msg.content.includes(`[${a.name}]`))?.name || 'Court System')}
+                    {msg.senderId === CREATOR_EMAIL_UID && (
+                      <span className="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[8px] text-amber-500 font-black">PRIME RESIDENT</span>
+                    )}
                   </p>
                 )}
                 <div className={cn(
-                  "p-5 rounded-2xl border transition-all hover:border-[#4B5563] relative group/msg",
+                  "p-5 rounded-2xl border transition-all hover:border-[#4B5563] relative group/msg overflow-hidden",
                   msg.senderType === 'user' 
                     ? "bg-[#1F2937] text-[#E5E7EB] border-[#374151] rounded-tr-none" 
                     : "bg-[#16191F] text-[#D1D5DB] border-[#2A2E37] rounded-tl-none border-l-2 border-l-[#4F46E5]"
                 )}>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap selection:bg-[#4F46E5]/40">{msg.content}</p>
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap selection:bg-[#4F46E5]/40 max-w-none">
+                    <ReactMarkdown
+                      components={{
+                        img: ({ ...props }) => (
+                          <img 
+                            {...props} 
+                            referrerPolicy="no-referrer" 
+                            className="max-w-full h-auto rounded-xl my-4 shadow-2xl border border-[#2A2E37] block mx-auto" 
+                          />
+                        ),
+                        p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+                        h1: ({ children }) => <h1 className="text-lg font-bold text-white mb-2">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-md font-bold text-white mb-2">{children}</h2>,
+                        ul: ({ children }) => <ul className="list-disc pl-4 mb-4 space-y-1">{children}</ul>,
+                        li: ({ children }) => <li className="pl-1">{children}</li>,
+                        strong: ({ children }) => <strong className="font-bold text-[#4F46E5]">{children}</strong>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
                   {msg.senderType === 'agent' && (
                     <button 
                       onClick={() => speakMessage(msg)}
@@ -2212,6 +2346,33 @@ export default function App() {
                       )}
                     </button>
                   )}
+
+                  {/* Message Reactions */}
+                  <div className={cn(
+                    "flex flex-wrap gap-1.5 mt-4",
+                    msg.senderType === 'user' ? "justify-end" : "justify-start"
+                  )}>
+                    {['✅', '💡', '⚠️', '👀'].map(emoji => {
+                      const users = msg.reactions?.[emoji] || [];
+                      const hasReacted = users.includes(user?.uid || '');
+                      
+                      return (
+                        <button
+                          key={emoji}
+                          onClick={() => toggleReaction(msg.id, emoji)}
+                          className={cn(
+                            "px-2 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 border",
+                            hasReacted 
+                              ? "bg-indigo-500/20 border-indigo-500/40 text-indigo-400" 
+                              : "bg-[#1F2937]/50 border-[#2A2E37] text-[#4B5563] hover:border-[#4B5563]"
+                          )}
+                        >
+                          <span>{emoji}</span>
+                          {users.length > 0 && <span>{users.length}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -2243,7 +2404,7 @@ export default function App() {
             <input 
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Speak into the room..."
+              placeholder="Speak to AnchorCourt..."
               className="w-full bg-[#1F2937] border border-[#374151] rounded-2xl py-4.5 px-6 pr-36 text-sm text-[#F3F4F6] focus:outline-none focus:border-[#4F46E5] focus:ring-4 focus:ring-[#4F46E5]/10 shadow-2xl transition-all placeholder:text-[#6B7280]"
             />
             <div className="absolute right-3 flex gap-2 items-center">
@@ -2274,20 +2435,20 @@ export default function App() {
             <div className="flex justify-center gap-4 mt-4">
                <span className="text-[10px] font-bold text-[#4B5563] uppercase tracking-widest flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-[#4F46E5]"></div>
-                Planning Active
+                Coordination Live
                </span>
                <span className="text-[10px] font-bold text-[#4B5563] uppercase tracking-widest flex items-center gap-1.5">
                 <div className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></div>
-                Creative Sync
+                Refinement Sync
                </span>
             </div>
           )}
         </div>
       </main>
 
-      {/* Right Sidebar: Context & House Connections */}
+      {/* Right Sidebar: Context & Integrations */}
       <AnimatePresence>
-        {!isFocusMode && !isRightSidebarCollapsed && (
+        {!isFocusMode && !isRightSidebarCollapsed &&
           <motion.aside 
             key="right-sidebar"
             initial={{ width: 0, opacity: 0 }}
@@ -2297,10 +2458,31 @@ export default function App() {
             className="h-full border-l border-[#2A2E37] bg-[#121418] flex flex-col overflow-hidden shrink-0"
           >
           <div className="p-6 flex-1 overflow-y-auto space-y-8">
-            <h2 className="text-[10px] uppercase tracking-[0.3em] text-[#6B7280] font-bold">Live Context</h2>
+            <div className="flex items-center gap-4 border-b border-[#2A2E37] pb-4">
+              <button 
+                onClick={() => setActiveRightTab('context')}
+                className={cn(
+                  "text-[10px] uppercase tracking-[0.3em] font-bold transition-all",
+                  activeRightTab === 'context' ? "text-white" : "text-[#6B7280] hover:text-[#9CA3AF]"
+                )}
+              >
+                Resident Context
+              </button>
+              <button 
+                onClick={() => setActiveRightTab('gallery')}
+                className={cn(
+                  "text-[10px] uppercase tracking-[0.3em] font-bold transition-all",
+                  activeRightTab === 'gallery' ? "text-white" : "text-[#6B7280] hover:text-[#9CA3AF]"
+                )}
+              >
+                Visions
+              </button>
+            </div>
             
-            {/* App House Connections */}
-            <div className="space-y-6">
+            {activeRightTab === 'context' &&
+              <div className="space-y-8">
+                {/* App Integrations */}
+                <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
                   <span className="text-[#9CA3AF]">Notion</span>
@@ -2313,7 +2495,7 @@ export default function App() {
                     <>
                       <div className="flex items-center gap-2 mb-3">
                         <div className="w-2 h-2 rounded-full bg-[#4F46E5] animate-pulse"></div>
-                        <span className="text-[11px] font-semibold text-[#F3F4F6]">House Synced</span>
+                        <span className="text-[11px] font-semibold text-[#F3F4F6]">Systems Synchronized</span>
                       </div>
                       <div className="h-1.5 w-full bg-[#1F2937] rounded-full overflow-hidden">
                         <div className="h-full bg-[#4F46E5] w-[100%] rounded-full shadow-[0_0_8px_rgba(79,70,229,0.5)]"></div>
@@ -2364,35 +2546,47 @@ export default function App() {
               {/* Task Delegation Board */}
               <div className="space-y-4 pt-4 border-t border-[#2A2E37]">
                 <div className="flex items-center justify-between px-2">
-                  <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] font-bold">Court Tasks</h2>
+                  <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] font-bold">Active Requests</h2>
                   <div className="flex items-center gap-1">
                     <div className="px-1.5 py-0.5 bg-[#4F46E5]/10 rounded-md text-[9px] font-black text-[#4F46E5]">
-                      {visibleTasks.filter(t => t.status !== 'completed').length} ACTIVE
+                      {tasks.filter(t => t.status !== 'completed').length} LIVE
                     </div>
                   </div>
                 </div>
                 
                 <div className="space-y-3">
-                  {visibleTasks.length === 0 ? (
+                  {tasks.length === 0 ? (
                     <div className="p-6 border border-dashed border-[#2A2E37] rounded-2xl text-center text-[10px] text-[#6B7280] italic">
                       No active tasks delegated.
                     </div>
                   ) : (
-                    visibleTasks.slice(0, 5).map(task => {
+                    tasks.slice(0, 5).map(task => {
                       const assignee = allAgents.find(a => a.id === task.assigneeId);
                       return (
                         <div key={task.id} className="group bg-[#0F1115] border border-[#2A2E37] rounded-2xl p-4 transition-all hover:border-[#4F46E5]/40 hover:bg-[#16191F]">
                           <div className="flex items-start justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                               <button 
-                                 onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
-                                 className="text-[#6B7280] hover:text-[#4F46E5] transition-colors"
-                               >
-                                 {task.status === 'completed' ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" /> : <Circle className="w-3.5 h-3.5" />}
-                               </button>
-                               <h3 className={cn("text-[11px] font-bold leading-tight group-hover:text-white transition-colors", task.status === 'completed' ? "line-through text-[#6B7280]" : "text-[#D1D5DB]")}>
-                                 {task.title}
-                               </h3>
+                            <div className="flex flex-col gap-1.5 flex-1">
+                               <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
+                                    className="text-[#6B7280] hover:text-[#4F46E5] transition-colors"
+                                  >
+                                    {task.status === 'completed' ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" /> : <Circle className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <h3 className={cn("text-[11px] font-bold leading-tight group-hover:text-white transition-colors", task.status === 'completed' ? "line-through text-[#6B7280]" : "text-[#D1D5DB]")}>
+                                    {task.title}
+                                  </h3>
+                               </div>
+                               <div className="flex items-center gap-2 ml-5">
+                                  <span className={cn(
+                                    "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest",
+                                    task.category === 'Logistics' ? "bg-amber-500/10 text-amber-500" :
+                                    task.category === 'Community' ? "bg-emerald-500/10 text-emerald-500" :
+                                    "bg-indigo-500/10 text-indigo-500"
+                                  )}>
+                                    {task.category || 'Operations'}
+                                  </span>
+                               </div>
                             </div>
                             <div className="w-5 h-5 rounded-lg bg-[#1F2937] flex items-center justify-center text-[10px] overflow-hidden" title={assignee?.name}>
                               <Avatar avatar={assignee?.avatar || '🤖'} className="w-full h-full flex items-center justify-center" />
@@ -2406,22 +2600,23 @@ export default function App() {
                               <Clock className="w-2.5 h-2.5" />
                               {task.deadline ? new Date(task.deadline).toLocaleDateString() : 'No Deadline'}
                             </div>
-                            <div className={cn(
-                              "px-2 py-0.5 rounded-full text-[8px] font-black tracking-tighter uppercase",
-                              task.status === 'completed' ? "bg-emerald-900/20 text-emerald-500" :
-                              task.status === 'in_progress' ? "bg-blue-900/20 text-blue-500" :
-                              "bg-[#1F2937] text-[#9CA3AF]"
-                            )}>
-                              {task.status}
-                            </div>
+                        <div className={cn(
+                          "px-2 py-0.5 rounded-full text-[8px] font-black tracking-tighter uppercase",
+                          task.status === 'completed' ? "bg-emerald-900/20 text-emerald-500" :
+                          task.status === 'in_progress' ? "bg-blue-900/20 text-blue-500" :
+                          task.status === 'blocked' ? "bg-red-900/20 text-red-500 animate-pulse" :
+                          "bg-[#1F2937] text-[#9CA3AF]"
+                        )}>
+                          {task.status}
+                        </div>
                           </div>
                         </div>
                       );
                     })
                   )}
-                  {visibleTasks.length > 5 && (
+                  {tasks.length > 5 && (
                     <button className="w-full py-2 text-[9px] font-black text-[#6B7280] uppercase tracking-widest hover:text-[#4F46E5] transition-colors">
-                      View All {visibleTasks.length} Tasks
+                      View All {tasks.length} Tasks
                     </button>
                   )}
                 </div>
@@ -2429,46 +2624,81 @@ export default function App() {
 
               {/* ADHD Focus Assist */}
               <div className="pt-4">
-                <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#F59E0B] font-bold mb-4">Room Pulse</h2>
+                <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#F59E0B] font-bold mb-4">Resident Focus</h2>
                 <div className="bg-[#B45309]/10 border border-[#B45309]/30 rounded-2xl p-5 shadow-inner">
                   <div className="flex -space-x-2 mb-4">
-                    {visibleAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
+                    {allAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
                       <div key={a.id} className="w-8 h-8 rounded-full bg-[#16191F] border-2 border-[#1F2937] flex items-center justify-center text-sm overflow-hidden" title={a.name}>
                         <Avatar avatar={a.avatar} className="w-full h-full flex items-center justify-center" />
                       </div>
                     ))}
                   </div>
                   <p className="text-xs text-[#FBBF24]/80 leading-relaxed mb-3 italic font-medium">
-                    "Sedia membantu, Boss. The room is steady, the Court is near, and we are ready when you call."
+                    "Sedia membantu, Boss. We are monitoring your AnchorCourt workspace and local services for you."
                   </p>
                   <div className="flex items-center gap-2 text-[10px] text-[#F59E0B] font-extrabold uppercase tracking-widest">
                     <Zap className="w-3 h-3" />
-                    Bilingual Support: Active
+                    Resident Support: Active
                   </div>
                 </div>
               </div>
             </div>
+          </div>
+        }
+
+            {activeRightTab === 'gallery' &&
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-3">
+                  {messages.filter(m => m.content.includes('![](') || m.content.includes('![Generated Image](')).map((msg, idx) => {
+                    const match = msg.content.match(/!\[.*?\]\((.*?)\)/);
+                    if (!match) return null;
+                    const imageUrl = match[1];
+                    return (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        key={idx} 
+                        className="aspect-square bg-[#0F1115] rounded-xl border border-[#2A2E37] overflow-hidden group/thumb cursor-pointer relative"
+                        onClick={() => {
+                           // Potential overlay logic here
+                        }}
+                      >
+                        <img src={imageUrl} alt="" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-end p-2">
+                           <p className="text-[8px] text-white font-bold truncate">Vision {idx + 1}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                  {messages.filter(m => m.content.includes('![](') || m.content.includes('![Generated Image](')).length === 0 && (
+                    <div className="col-span-2 py-20 text-center space-y-4 opacity-20">
+                      <ImageIcon className="w-8 h-8 mx-auto" />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">No visions synthesized</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            }
           </div>
 
           {/* System Status Bar */}
           <div className="p-4 bg-[#16191F] border-t border-[#2A2E37] flex items-center justify-between text-[9px] font-bold text-[#6B7280] uppercase tracking-widest">
             <div className="flex items-center gap-2">
               <div className={cn("w-1.5 h-1.5 rounded-full", (isNotionConnected || isGoogleConnected) ? "bg-emerald-500" : "bg-red-500")}></div>
-              <span>{(isNotionConnected || isGoogleConnected) ? "House Connections Live" : "Offline House Connections"}</span>
+              <span>{(isNotionConnected || isGoogleConnected) ? "Services Online" : "System Standby"}</span>
             </div>
-            <div>LATENCY: 12MS</div>
+            <div>COURT STATUS: CLEAR</div>
           </div>
         </motion.aside>
-      )}
+      }
       </AnimatePresence>
-      </div>
 
       {/* Admin Dashboard Modal */}
       <AnimatePresence>
         {showAdminDashboard && isAdmin && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAdminDashboard(false)} className="absolute inset-0 bg-[#0F1115]/95 backdrop-blur-md" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="relative w-full max-w-4xl bg-[#16191F] border border-amber-900/30 rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] overflow-hidden">
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} onClick={(e) => e.stopPropagation()} className="relative w-full max-w-4xl bg-[#16191F] border border-amber-900/30 rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] overflow-hidden">
               <div className="p-10 space-y-8">
                 <div className="flex items-center justify-between">
                   <div>
@@ -2476,14 +2706,14 @@ export default function App() {
                        <div className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-[9px] font-black text-amber-500 uppercase tracking-widest">Administrator Clearance</div>
                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                     </div>
-                    <h2 className="text-3xl font-bold text-white tracking-tight">AnchorCourt Court Core</h2>
+                    <h2 className="text-3xl font-bold text-white tracking-tight">AnchorCourt Intelligence Center</h2>
                   </div>
                   <button onClick={() => setShowAdminDashboard(false)} className="p-3 hover:bg-[#1F2937] rounded-full transition-colors text-[#6B7280]">
                     <X className="w-8 h-8" />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Global Directives */}
                   <div className="space-y-6">
                     <div className="p-6 bg-[#0F1115] border border-[#2A2E37] rounded-3xl space-y-4">
@@ -2492,98 +2722,227 @@ export default function App() {
                          <h3 className="text-sm font-bold uppercase tracking-widest">Global Directives</h3>
                        </div>
                        <p className="text-[11px] text-[#6B7280] leading-relaxed">
-                         These instructions are injected into the Intelligence Core for ALL users. Use this to set platform-wide behavioral boundaries, cultural norms, or standard operating procedures.
+                         These instructions are injected into the Intelligence Core for ALL users. Set behavioral boundaries and cultural norms.
                        </p>
                        <textarea 
                          value={globalConfig.instructions}
                          onChange={(e) => setGlobalConfig({ ...globalConfig, instructions: e.target.value })}
-                         placeholder="e.g. Always prioritize Malaysian Ringgit (MYR) for price discussions..."
-                         className="w-full h-64 bg-[#1F2937] border border-[#374151] rounded-2xl p-4 text-xs text-[#E5E7EB] focus:outline-none focus:border-amber-500/50 transition-all resize-none font-mono"
+                         placeholder="e.g. Always prioritize Malaysian Ringgit (MYR)..."
+                         className="w-full h-[520px] bg-[#1F2937] border border-[#374151] rounded-2xl p-4 text-xs text-[#E5E7EB] focus:outline-none focus:border-amber-500/50 transition-all resize-none font-mono"
                        />
                     </div>
                   </div>
 
-                  {/* Reference Knowledge & Knowledge Graph */}
+                  {/* Reference Knowledge */}
                   <div className="space-y-6">
                     <div className="p-6 bg-[#0F1115] border border-[#2A2E37] rounded-3xl space-y-4">
-                       <div className="flex items-center gap-3 text-[#4F46E5]">
-                         <HardDrive className="w-5 h-5" />
+                       <div className="flex items-center gap-3 text-amber-500">
+                         <Database className="w-5 h-5" />
                          <h3 className="text-sm font-bold uppercase tracking-widest">Knowledge Ingestion</h3>
                        </div>
                        <p className="text-[11px] text-[#6B7280] leading-relaxed">
-                         Upload references that agents should be aware of across all rooms.
+                         Prime the Intelligence Core with custom documentation and asset references.
                        </p>
+
+                       <input 
+                         type="file" 
+                         ref={fileInputRef} 
+                         onChange={(e) => handleFileSelection(e.target.files)}
+                         multiple
+                         className="hidden" 
+                       />
+
+                       <div 
+                         onDragOver={handleDragOver}
+                         onDragLeave={handleDragLeave}
+                         onDrop={handleDrop}
+                         className={`border-2 border-dashed rounded-[2rem] transition-all flex flex-col items-center justify-center py-10 px-6 space-y-4 cursor-pointer group/drop ${
+                           isDragging ? "border-amber-500 bg-amber-500/10" : "border-[#2A2E37] hover:border-amber-500/30 hover:bg-[#1F2937]/30"
+                         }`}
+                         onClick={() => fileInputRef.current?.click()}
+                       >
+                         <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                           isDragging ? "bg-amber-500 text-[#0F1115] scale-110" : "bg-[#1F2937] text-amber-500"
+                         }`}>
+                           <Upload className="w-6 h-6" />
+                         </div>
+                         <div className="text-center">
+                           <span className="block text-xs font-black text-white uppercase tracking-widest">Deploy Assets</span>
+                           <span className="block text-[10px] text-[#4B5563] mt-1">Drag files here or click to browse</span>
+                         </div>
+                       </div>
                        <div className="space-y-3">
                          <div className="flex gap-2">
                            <input 
                               value={fileInput}
                               onChange={(e) => setFileInput(e.target.value)}
-                              placeholder="Knowledge source URL or identifier..."
-                              className="flex-1 bg-[#1F2937] border border-[#374151] rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (fileInput.trim()) {
+                                    setGlobalConfig(prev => ({ ...prev, referenceFiles: [...(prev.referenceFiles || []), fileInput.trim()] }));
+                                    setFileInput('');
+                                  }
+                                }
+                              }}
+                              placeholder="URL or asset ID..."
+                              className="flex-1 bg-[#1F2937] border border-[#374151] rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-amber-500/50 transition-all"
                            />
                            <button 
+                             type="button"
                              onClick={() => {
                                if (fileInput.trim()) {
-                                 setGlobalConfig({ ...globalConfig, referenceFiles: [...globalConfig.referenceFiles, fileInput.trim()] });
+                                 setGlobalConfig(prev => ({ ...prev, referenceFiles: [...(prev.referenceFiles || []), fileInput.trim()] }));
                                  setFileInput('');
                                }
                              }}
-                             className="p-2 bg-[#4F46E5] text-white rounded-xl hover:bg-[#4338CA]"
+                             className="p-2 bg-amber-500 hover:bg-amber-400 text-[#0F1115] rounded-xl transition-all cursor-pointer"
                            >
-                             <Plus className="w-4 h-4" />
+                             <Plus className="w-5 h-5 font-bold" />
                            </button>
                          </div>
-                         <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {globalConfig.referenceFiles.map((file, idx) => (
-                              <div key={idx} className="flex items-center justify-between p-3 bg-[#1F2937]/50 rounded-xl border border-[#374151]">
-                                <div className="flex items-center gap-3 overflow-hidden">
-                                  <FileText className="w-3.5 h-3.5 text-[#6B7280]" />
-                                  <span className="text-[10px] text-[#E5E7EB] truncate">{file}</span>
-                                </div>
-                                <button 
-                                  onClick={() => setGlobalConfig({ ...globalConfig, referenceFiles: globalConfig.referenceFiles.filter((_, i) => i !== idx) })}
-                                  className="text-red-400 p-1 hover:bg-red-900/20 rounded"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                            {globalConfig.referenceFiles.length === 0 && (
-                              <div className="text-center py-6 text-[10px] text-[#4B5563] italic border border-dashed border-[#2A2E37] rounded-2xl">
-                                No global knowledge reference files uploaded.
-                              </div>
-                            )}
-                         </div>
+                         <div className="flex-1 overflow-y-auto space-y-3 max-h-60 pr-2 custom-scrollbar">
+                           {(globalConfig.referenceFiles || []).map((file, idx) => (
+                             <div key={idx} className="group relative">
+                               <div className="flex items-center justify-between p-4 bg-[#1F2937]/50 rounded-2xl border border-[#2A2E37] group-hover:border-amber-500/30 transition-all cursor-default">
+                                 <div className="flex items-center gap-3 overflow-hidden">
+                                   <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+                                     <FileText className="w-4 h-4" />
+                                   </div>
+                             <div className="overflow-hidden">
+                               <span className="block text-[11px] font-bold text-white truncate">{file}</span>
+                               <span className="block text-[8px] text-emerald-500 font-black uppercase tracking-tighter">Live Reference</span>
+                             </div>
+                                 </div>
+                                 <button 
+                                   onClick={() => setGlobalConfig(prev => ({ ...prev, referenceFiles: (prev.referenceFiles || []).filter((_, i) => i !== idx) }))}
+                                   className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-red-500/10 rounded-xl transition-all"
+                                   title="Remove reference"
+                                 >
+                                   <Trash2 className="w-3.5 h-3.5" />
+                                 </button>
+                               </div>
+                             </div>
+                           ))}
+                           {(!globalConfig.referenceFiles || globalConfig.referenceFiles.length === 0) && (
+                             <div className="py-12 px-4 border border-dashed border-[#2A2E37] rounded-3xl text-center">
+                               <div className="w-10 h-10 rounded-full bg-[#1F2937] flex items-center justify-center mx-auto mb-3">
+                                 <HardDrive className="w-5 h-5 text-[#4B5563]" />
+                               </div>
+                               <p className="text-[10px] font-bold text-[#4B5563] uppercase tracking-widest leading-relaxed">System Memory Clear</p>
+                               <p className="text-[8px] text-[#374151] mt-1">Add references to prime the Intelligence Core</p>
+                             </div>
+                           )}
+                        </div>
+                        <button 
+                          onClick={saveGlobalConfig}
+                          disabled={adminSaving}
+                          className="w-full py-4 bg-amber-500 hover:bg-amber-400 disabled:bg-[#1F2937] text-[#0F1115] disabled:text-[#4B5563] rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2"
+                        >
+                           {adminSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                           {adminSaving ? 'SYNCING...' : 'TRIGGER CORE SYNC'}
+                        </button>
                        </div>
                     </div>
 
-                    <div className="p-6 bg-amber-500/5 border border-amber-500/10 rounded-3xl">
-                       <div className="flex items-center gap-3 mb-4">
-                         <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center">
-                           <Info className="w-4 h-4 text-amber-500" />
-                         </div>
-                         <h3 className="text-[11px] font-black uppercase tracking-widest text-[#F3F4F6]">Security Notice</h3>
+                    <div className="p-6 bg-[#0F1115] border border-[#2A2E37] rounded-3xl space-y-4">
+                       <div className="flex items-center gap-3 text-red-500">
+                         <Zap className="w-5 h-5" />
+                         <h3 className="text-sm font-bold uppercase tracking-widest">System Latency</h3>
                        </div>
-                       <p className="text-[10px] text-amber-200/60 leading-relaxed">
-                         Changes made here affect the core logic of all active agents. Ensure directives do not conflict with individual agent personalities. Global Knowledge is static context and counts towards token limits.
+                       <div className="grid grid-cols-2 gap-2">
+                         <div className="p-3 bg-[#1F2937] rounded-xl">
+                            <div className="text-[8px] text-[#6B7280] uppercase">Inference</div>
+                            <div className="text-xs text-white font-mono">1.2s avg</div>
+                         </div>
+                         <div className="p-3 bg-[#1F2937] rounded-xl">
+                            <div className="text-[8px] text-[#6B7280] uppercase">Tokens</div>
+                            <div className="text-xs text-white font-mono">4.2k/min</div>
+                         </div>
+                       </div>
+                    </div>
+                  </div>
+
+                  {/* User & Member Management */}
+                  <div className="space-y-6">
+                    <div className="p-6 bg-[#0F1115] border border-[#2A2E37] rounded-3xl space-y-4 flex flex-col h-full">
+                       <div className="flex items-center gap-3 text-emerald-500">
+                         <Users className="w-5 h-5" />
+                         <h3 className="text-sm font-bold uppercase tracking-widest">Member Roster</h3>
+                       </div>
+                       <p className="text-[11px] text-[#6B7280] leading-relaxed">
+                         Manage private profiles for members with special needs. Ensure agents understand how to interact.
                        </p>
+                       <div className="flex-1 overflow-y-auto space-y-2 max-h-[360px] pr-2 custom-scrollbar">
+                          {Object.values(profiles).length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 px-4 bg-[#0F1115] border border-[#2A2E37] rounded-3xl text-center space-y-3">
+                              <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                <Users className="w-5 h-5" />
+                              </div>
+                              <div className="text-[10px] font-black uppercase text-[#6B7280] tracking-widest">No Members Registered</div>
+                              <p className="text-[9px] text-[#4B5563] max-w-[160px]">Members appear here once they log into the AnchorCourt platform for the first time.</p>
+                            </div>
+                          ) : (
+                            (Object.values(profiles) as PublicProfile[]).map(profile => (
+                              <button 
+                                key={profile.userId} 
+                                onClick={() => setSelectedUserId(profile.userId)}
+                                className="w-full p-3 bg-[#1F2937]/50 border border-[#2A2E37] rounded-2xl flex items-center justify-between hover:border-emerald-500/50 hover:bg-[#1F2937] transition-all group cursor-pointer text-left focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-full bg-[#121418] flex items-center justify-center text-emerald-500 font-bold text-sm ring-1 ring-emerald-500/20 group-hover:ring-emerald-500/40 transition-all relative">
+                                    {profile.photoURL ? (
+                                      <img src={profile.photoURL} alt={profile.displayName} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      profile.displayName.slice(0, 2).toUpperCase()
+                                    )}
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-[#1F2937] rounded-full"></div>
+                                  </div>
+                                  <div className="overflow-hidden">
+                                    <div className="text-xs font-bold text-white group-hover:text-emerald-400 transition-colors truncate">{profile.displayName}</div>
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-[9px] text-[#6B7280] truncate max-w-[80px]">{profile.email}</div>
+                                      <div className="px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-[4px] text-[7px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap">Neuro-Diverse Profile</div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="p-1.5 bg-emerald-500/0 group-hover:bg-emerald-500/20 text-[#6B7280] group-hover:text-emerald-500 rounded-lg transition-all">
+                                  <ChevronRight className="w-4 h-4" />
+                                </div>
+                              </button>
+                            ))
+                          )}
+                       </div>
+
+                       <div className="pt-4 border-t border-[#2A2E37]">
+                          <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                             <div className="flex items-center gap-2 mb-2">
+                               <Info className="w-3.5 h-3.5 text-emerald-500" />
+                               <span className="text-[10px] font-black uppercase text-emerald-500 tracking-widest">Roster Protocol</span>
+                             </div>
+                             <p className="text-[9px] text-[#6B7280] leading-relaxed">
+                               Editing a profile here updates the "Handling Notes" for that specific user ID across all threads.
+                             </p>
+                          </div>
+                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end gap-4 pt-4 border-t border-[#2A2E37]">
+                <div className="flex justify-end gap-4 mt-6 pt-6 border-t border-amber-900/20">
                   <button 
                     onClick={() => setShowAdminDashboard(false)}
-                    className="px-8 py-3 rounded-2xl text-xs font-bold text-[#6B7280] hover:bg-[#1F2937] transition-all"
+                    className="px-8 py-3 rounded-2xl text-xs font-bold text-[#6B7280] hover:bg-[#1F2937] hover:text-[#E5E7EB] transition-all"
                   >
-                    DISCARD CHANGES
+                    DISCARD
                   </button>
                   <button 
                     onClick={saveGlobalConfig}
                     disabled={adminSaving}
-                    className="px-12 py-3 bg-amber-500 text-[#0F1115] rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-amber-400 transition-all flex items-center gap-2 shadow-[0_8px_16px_-4px_rgba(245,158,11,0.4)] disabled:opacity-50"
+                    className="px-10 py-3 bg-amber-500 hover:bg-amber-400 text-[#0F1115] rounded-2xl text-xs font-black uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-[0_12px_24px_-8px_rgba(245,158,11,0.4)] flex items-center gap-2"
                   >
-                    {adminSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'OVERWRITE CORE DIRECTIVES'}
+                    {adminSaving ? <Loader2 className="w-4 h-4 animate-spin text-[#0F1115]" /> : <Shield className="w-4 h-4" />}
+                    {adminSaving ? 'COMMITTING...' : 'COMMIT CORE PROTOCOLS'}
                   </button>
                 </div>
               </div>
@@ -2592,6 +2951,44 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {selectedUserId && (
+          <MemberProfileModal 
+            isOpen={!!selectedUserId}
+            onClose={() => setSelectedUserId(null)}
+            config={adminMemberConfig}
+            onSave={adminSaveMemberConfig}
+            isSaving={adminMemberConfigSaving}
+            error={null}
+          />
+        )}
+      </AnimatePresence>
+ 
+       <AnimatePresence>
+        {showMemberProfileModal && (
+          <MemberProfileModal 
+            isOpen={showMemberProfileModal}
+            onClose={() => setShowMemberProfileModal(false)}
+            config={memberConfig}
+            onSave={saveMemberConfig}
+            isSaving={memberConfigSaving}
+            error={memberConfigError}
+          />
+        )}
+      </AnimatePresence>
+
+      <ImageStudio 
+        isOpen={showImageStudio}
+        onClose={() => setShowImageStudio(false)}
+        onSaveToThread={handleSaveStudioResult}
+      />
+
+      <BriefingModal
+        isOpen={showBriefingModal}
+        onClose={() => setShowBriefingModal(false)}
+        summary={briefingContent}
+        loading={briefingLoading}
+      />
     </div>
   );
 }
