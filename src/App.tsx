@@ -428,23 +428,23 @@ export default function App() {
   };
 
   const startEditingAgent = (agent: Agent) => {
-    setNewAgent({
-      name: agent.name,
-      role: agent.role,
-      personality: agent.personality,
-      avatar: agent.avatar,
-      systemInstruction: agent.systemInstruction,
-      traits: agent.traits || {
-        verbosity: 5,
-        formality: 5,
-        tone: 'Direct',
-        language: 'English'
-      },
-      access: 'family_safe'
-    });
-    setEditingAgentId(agent.id);
-    setShowCreateAgentModal(true);
-  };
+  setNewAgent({
+    name: agent.name,
+    role: agent.role,
+    personality: agent.personality,
+    avatar: agent.avatar,
+    systemInstruction: agent.systemInstruction,
+    traits: agent.traits || {
+      verbosity: 5,
+      formality: 5,
+      tone: 'Direct',
+      language: 'English'
+    },
+    access: agent.access ?? 'family_safe'
+  });
+  setEditingAgentId(agent.id);
+  setShowCreateAgentModal(true);
+};
 
   const inviteUserByEmail = async (e: React.FormEvent) => {
     e.preventDefault();
