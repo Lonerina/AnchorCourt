@@ -590,10 +590,10 @@ export default function App() {
         defaultAgentIds: selectedAgentIds,
         updatedAt: serverTimestamp()
       }, { merge: true });
-      alert("Quick Summon selection saved! New rooms will now default to these agents.");
+      alert("Court Summon selection saved! New rooms will now default to these agents.");
     } catch (error) {
       console.error("Failed to save defaults:", error);
-      alert("Failed to save Quick Summon selection.");
+      alert("Failed to save Court Summon selection.");
     }
   };
 
@@ -984,7 +984,7 @@ export default function App() {
           - GOOGLE APPS SYNERGY: Suggest relevant Google files only when they genuinely support the current work.
           
           MULTI-USER CONTEXT:
-          - This may be a group discussion. Address users by name and be mindful that agents are serving a team, not just an individual.
+          - This may be a shared room. Address users by name and be mindful that Court voices are serving the room, not just one individual.
           
           GLOBAL KNOWLEDGE & DIRECTIVES (MANDATORY):
           ${globalConfig.instructions || 'No global directives set.'}
@@ -1214,7 +1214,7 @@ export default function App() {
             >
               <div className="p-8 space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white tracking-tight">Integrations</h2>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">House Connections</h2>
                   <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-[#1F2937] rounded-full">
                     <X className="w-6 h-6" />
                   </button>
@@ -1227,7 +1227,7 @@ export default function App() {
                          <FileText className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Notion Workspace</h4>
+                        <h4 className="font-bold text-white">Notion Archive</h4>
                         <p className="text-xs text-[#9CA3AF]">Access your pages and databases</p>
                       </div>
                     </div>
@@ -1251,7 +1251,7 @@ export default function App() {
                           </button>
                        </div>
                        <p className="text-[10px] text-[#6B7280]">
-                         Find this in your <a href="https://www.notion.so/my-integrations" target="_blank" className="text-[#4F46E5] hover:underline inline-flex items-center gap-1">Notion Integrations <ExternalLink className="w-2 h-2" /></a>
+                         Find this in your <a href="https://www.notion.so/my-integrations" target="_blank" className="text-[#4F46E5] hover:underline inline-flex items-center gap-1">Notion integrations <ExternalLink className="w-2 h-2" /></a>
                        </p>
                     </div>
                   </div>
@@ -1262,7 +1262,7 @@ export default function App() {
                          <Layout className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Google Workspace</h4>
+                        <h4 className="font-bold text-white">Google Reach</h4>
                         <p className="text-xs text-[#9CA3AF]">Manage Drive, Calendar, and Gmail</p>
                       </div>
                     </div>
@@ -1294,7 +1294,7 @@ export default function App() {
                          <Zap className="w-6 h-6" />
                       </div>
                       <div>
-                        <h4 className="font-bold text-white">Quick Summon</h4>
+                        <h4 className="font-bold text-white">Court Summon</h4>
                         <p className="text-xs text-[#9CA3AF]">Agents active by default in new rooms</p>
                       </div>
                     </div>
@@ -1718,7 +1718,7 @@ export default function App() {
                       <button 
                         onClick={updateQuickSummon}
                         className="p-1 hover:bg-[#1F2937] rounded-md text-amber-500 transition-colors"
-                        title="Save current selection as Quick Summon default"
+                        title="Save current selection as Court Summon default"
                       >
                         <Star className="w-3.5 h-3.5" />
                       </button>
@@ -1741,7 +1741,7 @@ export default function App() {
                           setShowCreateAgentModal(true);
                         }}
                         className="p-1 hover:bg-[#1F2937] rounded-md text-[#4F46E5] transition-colors"
-                        title="Create Custom Agent"
+                        title="Forge Court Voice"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -1787,7 +1787,7 @@ export default function App() {
                             <div className="flex items-center gap-1.5 overflow-hidden">
                               <p className="text-xs font-bold truncate group-hover:text-white">{agent.name}</p>
                               {defaultAgentIds.includes(agent.id) && (
-                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" title="Quick Summon Default" />
+                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" title="Court Summon Default" />
                               )}
                             </div>
                             {selectedAgentIds.includes(agent.id) && <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="w-1 h-1 rounded-full bg-[#4F46E5]" />}
@@ -1882,7 +1882,7 @@ export default function App() {
                           <button 
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm('Delete this discussion?')) {
+                              if (confirm('Delete this room?')) {
                                 deleteThread(thread.id);
                               }
                             }}
@@ -2197,7 +2197,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Right Sidebar: Context & Integrations */}
+      {/* Right Sidebar: Context & House Connections */}
       <AnimatePresence>
         {!isFocusMode && !isRightSidebarCollapsed && (
           <motion.aside 
@@ -2211,7 +2211,7 @@ export default function App() {
           <div className="p-6 flex-1 overflow-y-auto space-y-8">
             <h2 className="text-[10px] uppercase tracking-[0.3em] text-[#6B7280] font-bold">Live Context</h2>
             
-            {/* App Integrations */}
+            {/* App House Connections */}
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
@@ -2225,7 +2225,7 @@ export default function App() {
                     <>
                       <div className="flex items-center gap-2 mb-3">
                         <div className="w-2 h-2 rounded-full bg-[#4F46E5] animate-pulse"></div>
-                        <span className="text-[11px] font-semibold text-[#F3F4F6]">Workspace Synced</span>
+                        <span className="text-[11px] font-semibold text-[#F3F4F6]">House Synced</span>
                       </div>
                       <div className="h-1.5 w-full bg-[#1F2937] rounded-full overflow-hidden">
                         <div className="h-full bg-[#4F46E5] w-[100%] rounded-full shadow-[0_0_8px_rgba(79,70,229,0.5)]"></div>
@@ -2276,7 +2276,7 @@ export default function App() {
               {/* Task Delegation Board */}
               <div className="space-y-4 pt-4 border-t border-[#2A2E37]">
                 <div className="flex items-center justify-between px-2">
-                  <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] font-bold">Delegated Tasks</h2>
+                  <h2 className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] font-bold">Court Tasks</h2>
                   <div className="flex items-center gap-1">
                     <div className="px-1.5 py-0.5 bg-[#4F46E5]/10 rounded-md text-[9px] font-black text-[#4F46E5]">
                       {tasks.filter(t => t.status !== 'completed').length} ACTIVE
@@ -2366,7 +2366,7 @@ export default function App() {
           <div className="p-4 bg-[#16191F] border-t border-[#2A2E37] flex items-center justify-between text-[9px] font-bold text-[#6B7280] uppercase tracking-widest">
             <div className="flex items-center gap-2">
               <div className={cn("w-1.5 h-1.5 rounded-full", (isNotionConnected || isGoogleConnected) ? "bg-emerald-500" : "bg-red-500")}></div>
-              <span>{(isNotionConnected || isGoogleConnected) ? "Integrations Live" : "Offline Integrations"}</span>
+              <span>{(isNotionConnected || isGoogleConnected) ? "House Connections Live" : "Offline House Connections"}</span>
             </div>
             <div>LATENCY: 12MS</div>
           </div>
@@ -2423,7 +2423,7 @@ export default function App() {
                          <h3 className="text-sm font-bold uppercase tracking-widest">Knowledge Ingestion</h3>
                        </div>
                        <p className="text-[11px] text-[#6B7280] leading-relaxed">
-                         Upload references that agents should be aware of across all discussions.
+                         Upload references that agents should be aware of across all rooms.
                        </p>
                        <div className="space-y-3">
                          <div className="flex gap-2">
