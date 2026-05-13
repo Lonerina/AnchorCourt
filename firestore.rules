@@ -68,8 +68,20 @@ service cloud.firestore {
       
       match /private/integrations {
         allow get: if isOwner(userId);
-        allow create: if isOwner(userId) && incoming().keys().hasAll(['notion']) || incoming().keys().hasAll(['google']);
+        allow create: if isOwner(userId) && (incoming().keys().hasAll(['notion']) || incoming().keys().hasAll(['google']) || incoming().keys().hasAll(['defaultAgentIds']));
         allow update: if isOwner(userId);
+      }
+
+      match /private/member_profile {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /private/member_preferences {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /private/member_handling {
+        allow read, write: if isOwner(userId);
       }
 
       match /agents/{agentId} {
@@ -81,7 +93,7 @@ service cloud.firestore {
                       && incoming().name is string && incoming().name.size() <= 50;
         allow update: if isOwner(userId) 
                       && incoming().userId == userId
-                      && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'personality', 'avatar', 'systemInstruction', 'traits']);
+                      && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'personality', 'avatar', 'avatarUrl', 'systemInstruction', 'traits']);
         allow delete: if isOwner(userId);
       }
     }
