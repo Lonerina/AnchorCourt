@@ -17,8 +17,15 @@ import {
   Volume2,
   Clock,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Camera,
+  Upload,
+  Loader2
 } from 'lucide-react';
+
+import { uploadFile, getAvatarPath } from '../lib/storage';
+import { db } from '../lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 import {
   type PrivateMemberConfig,
@@ -45,6 +52,8 @@ interface MemberProfileModalProps {
   onSave: (config: PrivateMemberConfig) => Promise<void>;
   memberName?: string;
   isAdminView?: boolean;
+  userId?: string;
+  photoURL?: string;
 }
 
 const Section: React.FC<{
@@ -94,10 +103,14 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
   error,
   onSave,
   memberName,
-  isAdminView = false
+  isAdminView = false,
+  userId,
+  photoURL
 }) => {
   const [draft, setDraft] = useState<PrivateMemberConfig>(DEFAULT_MEMBER_CONFIG);
   const [saveMessage, setSaveMessage] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (config) setDraft(config);
@@ -105,17 +118,42 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
 
   if (!isOpen) return null;
 
-  const updateField = <K extends keyof PrivateMemberConfig>(field: K, value: PrivateMemberConfig[K]) => {
-    setDraft(prev => ({ ...prev, [field]: value }));
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    setIsUploading(true);
+    setSaveMessage('Uploading...');
+    try {
+      const path = getAvatarPath(userId, `${Date.now()}_${file.name}`);
+      const url = await uploadFile(path, file);
+      await updateDoc(doc(db, `profiles/${userId}`), { photoURL: url });
+      setSaveMessage('Profile picture updated.');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (err: any) {
+      console.error('Upload handler error:', err);
+      setSaveMessage(`Error: ${err.message || 'Upload failed'}`);
+      setTimeout(() => setSaveMessage(''), 5000);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const toggleArrayValue = <T extends string>(field: keyof PrivateMemberConfig, value: T) => {
+  const updateProfile = <K extends keyof typeof draft.profile>(field: K, value: typeof draft.profile[K]) => {
+    setDraft(prev => ({ ...prev, profile: { ...prev.profile, [field]: value } }));
+  };
+
+  const updatePreferences = <K extends keyof typeof draft.preferences>(field: K, value: typeof draft.preferences[K]) => {
+    setDraft(prev => ({ ...prev, preferences: { ...prev.preferences, [field]: value } }));
+  };
+
+  const toggleSupportNeed = (need: SupportNeed) => {
     setDraft(prev => {
-      const current = (prev[field] as T[]) || [];
-      const next = current.includes(value)
-        ? current.filter(v => v !== value)
-        : [...current, value];
-      return { ...prev, [field]: next } as PrivateMemberConfig;
+      const current = prev.profile.supportNeeds || [];
+      const next = current.includes(need)
+        ? current.filter(v => v !== need)
+        : [...current, need];
+      return { ...prev, profile: { ...prev.profile, supportNeeds: next } };
     });
   };
 
@@ -183,34 +221,64 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                   )}
 
                   <Section title="Identity and Context" icon={<UserIcon className="w-5 h-5 text-sky-400" />}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <label className="block">
-                        <span className="text-sm text-[#D1D5DB]">Display name</span>
-                        <input
-                          value={draft.displayName || ''}
-                          onChange={(e) => updateField('displayName', e.target.value)}
-                          className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                    <div className="flex flex-col md:flex-row gap-6 mb-4">
+                      <div className="relative group">
+                        <div className="w-24 h-24 rounded-2xl bg-[#1F2937] border-2 border-[#374151] overflow-hidden flex items-center justify-center">
+                          {isUploading ? (
+                            <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+                          ) : photoURL ? (
+                            <img src={photoURL} className="w-full h-full object-cover" alt="Avatar" />
+                          ) : (
+                            <UserIcon className="w-12 h-12 text-[#9CA3AF]" />
+                          )}
+                        </div>
+                        {!isAdminView && (
+                          <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            className="absolute -bottom-2 -right-2 p-2 bg-indigo-600 rounded-lg text-white shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Upload avatar"
+                          >
+                            <Camera className="w-4 h-4" />
+                          </button>
+                        )}
+                        <input 
+                          type="file" 
+                          ref={fileInputRef} 
+                          onChange={handleAvatarUpload} 
+                          className="hidden" 
+                          accept="image/*" 
                         />
-                      </label>
-                      <label className="block">
-                        <span className="text-sm text-[#D1D5DB]">Pronouns</span>
-                        <input
-                          value={draft.pronouns || ''}
-                          onChange={(e) => updateField('pronouns', e.target.value)}
-                          className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
-                        />
-                      </label>
+                      </div>
+
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="block">
+                          <span className="text-sm text-[#D1D5DB]">Display name</span>
+                          <input
+                            value={draft.profile.preferredName || ''}
+                            onChange={(e) => updateProfile('preferredName', e.target.value)}
+                            className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm text-[#D1D5DB]">Role or Stage</span>
+                          <input
+                            value={draft.profile.roleOrStage || ''}
+                            onChange={(e) => updateProfile('roleOrStage', e.target.value)}
+                            className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                          />
+                        </label>
+                      </div>
                     </div>
                   </Section>
 
                   <Section title="Support Needs" icon={<Brain className="w-5 h-5 text-indigo-400" />}>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {SUPPORT_NEEDS.map((need: SupportNeed) => {
-                        const active = draft.supportNeeds.includes(need);
+                        const active = draft.profile.supportNeeds.includes(need);
                         return (
                           <button
                             key={need}
-                            onClick={() => toggleArrayValue('supportNeeds', need)}
+                            onClick={() => toggleSupportNeed(need)}
                             className={`px-4 py-3 rounded-xl border text-left transition-colors ${active ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-[#111827] border-[#374151] text-[#D1D5DB] hover:bg-[#1F2937]'}`}
                           >
                             <div className="flex items-center justify-between gap-3">
@@ -228,19 +296,31 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <label className="block">
                         <span className="text-sm text-[#D1D5DB]">Tone</span>
-                        <select value={draft.responseTone} onChange={(e) => updateField('responseTone', e.target.value as ResponseTone)} className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white">
+                        <select 
+                          value={draft.preferences.defaultTone} 
+                          onChange={(e) => updatePreferences('defaultTone', e.target.value as ResponseTone)} 
+                          className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                        >
                           {RESPONSE_TONES.map(t => <option key={t} value={t}>{FIELD_LABELS[t] || t}</option>)}
                         </select>
                       </label>
                       <label className="block">
                         <span className="text-sm text-[#D1D5DB]">Length</span>
-                        <select value={draft.responseLength} onChange={(e) => updateField('responseLength', e.target.value as ResponseLength)} className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white">
+                        <select 
+                          value={draft.preferences.responseLength} 
+                          onChange={(e) => updatePreferences('responseLength', e.target.value as ResponseLength)} 
+                          className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                        >
                           {RESPONSE_LENGTHS.map(t => <option key={t} value={t}>{FIELD_LABELS[t] || t}</option>)}
                         </select>
                       </label>
                       <label className="block">
                         <span className="text-sm text-[#D1D5DB]">Guidance style</span>
-                        <select value={draft.guidanceStyle} onChange={(e) => updateField('guidanceStyle', e.target.value as GuidanceStyle)} className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white">
+                        <select 
+                          value={draft.preferences.guidanceStyle} 
+                          onChange={(e) => updatePreferences('guidanceStyle', e.target.value as GuidanceStyle)} 
+                          className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white"
+                        >
                           {GUIDANCE_STYLES.map(t => <option key={t} value={t}>{FIELD_LABELS[t] || t}</option>)}
                         </select>
                       </label>
@@ -252,17 +332,17 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                       <label className="block">
                         <span className="text-sm text-[#D1D5DB]">Sensory notes</span>
                         <textarea
-                          value={draft.sensoryNotes || ''}
-                          onChange={(e) => updateField('sensoryNotes', e.target.value)}
+                          value={draft.profile.sensoryNotes || ''}
+                          onChange={(e) => updateProfile('sensoryNotes', e.target.value)}
                           rows={4}
                           className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white resize-none"
                         />
                       </label>
                       <label className="block">
-                        <span className="text-sm text-[#D1D5DB]">Timing notes</span>
+                        <span className="text-sm text-[#D1D5DB]">Important Context</span>
                         <textarea
-                          value={draft.timingNotes || ''}
-                          onChange={(e) => updateField('timingNotes', e.target.value)}
+                          value={draft.profile.importantContext || ''}
+                          onChange={(e) => updateProfile('importantContext', e.target.value)}
                           rows={4}
                           className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white resize-none"
                         />
@@ -270,36 +350,16 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                     </div>
                   </Section>
 
-                  <Section title="Boundaries and Safety" icon={<Shield className="w-5 h-5 text-rose-400" />}>
-                    <label className="block mb-4">
-                      <span className="text-sm text-[#D1D5DB]">Hard boundaries</span>
-                      <textarea
-                        value={draft.hardBoundaries || ''}
-                        onChange={(e) => updateField('hardBoundaries', e.target.value)}
-                        rows={4}
-                        className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white resize-none"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-sm text-[#D1D5DB]">Comforting anchors</span>
-                      <textarea
-                        value={draft.comfortAnchors || ''}
-                        onChange={(e) => updateField('comfortAnchors', e.target.value)}
-                        rows={4}
-                        className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white resize-none"
-                      />
-                    </label>
-                  </Section>
-
                   <Section title="Notes" icon={<BookOpen className="w-5 h-5 text-violet-400" />} defaultOpen={false}>
                     <label className="block">
-                      <span className="text-sm text-[#D1D5DB]">Additional notes</span>
+                      <span className="text-sm text-[#D1D5DB]">Detailed Handling Summary</span>
                       <textarea
-                        value={draft.notes || ''}
-                        onChange={(e) => updateField('notes', e.target.value)}
-                        rows={5}
-                        className="mt-2 w-full px-3 py-2 rounded-lg bg-[#111827] border border-[#374151] text-white resize-none"
+                        value={draft.handling.summary || ''}
+                        readOnly
+                        rows={3}
+                        className="mt-2 w-full px-3 py-2 rounded-lg bg-[#0F172A] border border-[#2A2E37] text-[#9CA3AF] resize-none font-mono text-[10px]"
                       />
+                      <p className="mt-1 text-[9px] text-[#6B7280]">This summary is auto-generated based on your preferences to guide AI agents.</p>
                     </label>
                   </Section>
                 </>
