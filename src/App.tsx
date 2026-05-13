@@ -3,11 +3,12 @@ import { db, auth } from './lib/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, setDoc, doc, serverTimestamp, where, getDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { ai, MODELS } from './lib/gemini';
-import { MessageSquare, Layout, FileText, Settings, Send, User as UserIcon, Bot, Plus, Trash2, Search, Zap, Loader2, X, Check, ExternalLink, Clock, Calendar, CheckCircle2, Circle, UserPlus, Users, Star, Shield, HardDrive, Info, Mic, MicOff, Volume2, ChevronLeft, ChevronRight, PanelLeft, PanelRight, Heart, Brain, ZapOff, Sparkles, BookOpen, Database, Upload, Image as ImageIcon } from 'lucide-react';
+import { MessageSquare, Layout, FileText, Settings, Send, User as UserIcon, Bot, Plus, Trash2, Search, Zap, Loader2, X, Check, ExternalLink, Clock, Calendar, CheckCircle2, Circle, UserPlus, Users, Star, Shield, HardDrive, Info, Mic, MicOff, Volume2, ChevronLeft, ChevronRight, PanelLeft, PanelRight, Heart, Brain, ZapOff, Sparkles, BookOpen, Database, Upload, Image as ImageIcon, Github } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from './lib/utils';
 import { Type } from '@google/genai';
 import { useMemberProfile } from './lib/useMemberProfile';
+import { uploadFile, getAgentAvatarPath } from './lib/storage';
 import { applyMemberProfileToInstruction } from './lib/memberProfileAgentContext';
 import { 
   type PrivateMemberConfig, 
@@ -44,6 +45,7 @@ interface Thread {
   title: string;
   lastMessage?: string;
   updatedAt: any;
+  activeAgentIds?: string[];
 }
 
 interface PublicProfile {
@@ -73,6 +75,7 @@ interface Agent {
   role: string;
   personality: string;
   avatar: string;
+  avatarUrl?: string;
   systemInstruction: string;
   traits?: {
     verbosity: number; // 1-10
@@ -119,17 +122,31 @@ const DEFAULT_AGENTS: Agent[] = [
     avatar: '🇲🇾',
     systemInstruction: 'You are Court Lokal (Pakar Tempatan). You specialize in Malaysian culture, food, geography, and local regulations. You speak fluent English and Malay (and Manglish!). You help the user with anything specific to living or working in Malaysia.',
     traits: { verbosity: 6, formality: 3, tone: 'Playful', language: 'Malay' }
+  },
+  {
+    id: 'agent_developer',
+    name: 'Court Developer',
+    role: 'Coding & Engineering',
+    personality: 'Technical, precise, and supportive of learning. Great at debugging and explaining code.',
+    avatar: '💻',
+    systemInstruction: 'You are Court Developer. You specialize in software engineering, educational coding, and technical projects. You use GitHub integrations to help users manage their repositories, search for learning resources, and debug assignments. You are fluent in various programming languages and follow best practices. You communicate in English and Malay. You are part of a multi-agent team.',
+    traits: { verbosity: 6, formality: 7, tone: 'Direct', language: 'English' }
   }
 ];
 
 const PRESET_AVATARS = ['🤖', '🧠', '✨', '🛸', '🛰️', '🪐', '🧬', '🛡️', '⚡', '🌌', '🌋', '🌊', '🔥', '🍃', '💎', '🎯'];
 
-const Avatar = ({ avatar, className }: { avatar: string; className?: string }) => {
+const Avatar = ({ avatar, url, className }: { avatar: string; url?: string; className?: string }) => {
+  if (url) {
+    return <img src={url} className={cn("inline-block object-cover", className)} alt="Avatar" referrerPolicy="no-referrer" />;
+  }
   if (avatar.startsWith('data:image')) {
     return <img src={avatar} className={cn("inline-block object-cover", className)} alt="Avatar" referrerPolicy="no-referrer" />;
   }
   return <span className={className}>{avatar}</span>;
 };
+
+const CREATOR_EMAIL_UID = "T6P09PjSWhO15fK6N0XGzG1E8qH3"; // Fixed UID for Prime Resident
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -184,6 +201,9 @@ export default function App() {
   };
   const [isRecording, setIsRecording] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const [autoSendVoice, setAutoSendVoice] = useState(false);
+  const [autoReadReplies, setAutoReadReplies] = useState(false);
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const {
@@ -212,12 +232,14 @@ export default function App() {
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [isAgentAvatarUploading, setIsAgentAvatarUploading] = useState(false);
   
   const [newAgent, setNewAgent] = useState<Omit<Agent, 'id'>>({
     name: '',
     role: '',
     personality: '',
     avatar: '🤖',
+    avatarUrl: '',
     systemInstruction: '',
     accessLevel: 'family_safe',
     traits: {
@@ -234,6 +256,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [notionKey, setNotionKey] = useState('');
   const [isNotionConnected, setIsNotionConnected] = useState(false);
+  const [githubKey, setGithubKey] = useState('');
+  const [isGithubConnected, setIsGithubConnected] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [defaultAgentIds, setDefaultAgentIds] = useState<string[]>(['agent_assistant']);
@@ -277,9 +301,17 @@ export default function App() {
               setGoogleAccessToken(data.google.accessToken);
               setIsGoogleConnected(true);
             }
+            if (data.github?.apiKey) {
+              setGithubKey(data.github.apiKey);
+              setIsGithubConnected(true);
+            }
             if (data.defaultAgentIds) {
               setDefaultAgentIds(data.defaultAgentIds);
               setSelectedAgentIds(data.defaultAgentIds);
+            }
+            if (data.voice) {
+              setAutoSendVoice(!!data.voice.autoSend);
+              setAutoReadReplies(!!data.voice.autoRead);
             }
           }
         }).catch(error => {
@@ -390,14 +422,14 @@ export default function App() {
     setBriefingLoading(true);
     try {
       const historyText = messages.slice(-15).map(m => `${m.senderType === 'user' ? 'User' : 'Agent'}: ${m.content}`).join('\n');
-      const result = await ai.generateContent({
+      const result = await ai.models.generateContent({
         model: MODELS.FLASH,
         contents: [{
           role: 'user',
           parts: [{ text: `Generate a concise "Resident Briefing" for the Following AnchorCourt Interaction Stream. Focus on: 1. Core Goal, 2. Key Decisions Made, 3. Pending Tasks for Residents, 4. Critical Warnings (if any). Use markdown formatting.\n\nSTREAM DATA:\n${historyText}` }]
         }]
       });
-      setBriefingContent(result.response.text());
+      setBriefingContent(result.text || "Summary unavailable.");
     } catch (error) {
       console.error("Briefing error:", error);
       setBriefingContent("Unable to synthesize briefing at this time. Data saturation too high.");
@@ -426,6 +458,25 @@ export default function App() {
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
       console.error("Failed to save Notion key:", error);
+      setSaveStatus('idle');
+    }
+  };
+
+  const saveGithubKey = async () => {
+    if (!user || !githubKey) return;
+    setSaveStatus('saving');
+    try {
+      await setDoc(doc(db, `users/${user.uid}/private/integrations`), {
+        github: {
+          apiKey: githubKey,
+          updatedAt: serverTimestamp()
+        }
+      }, { merge: true });
+      setIsGithubConnected(true);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error("Failed to save GitHub key:", error);
       setSaveStatus('idle');
     }
   };
@@ -464,20 +515,40 @@ export default function App() {
     }
   };
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 200 * 1024) { // 200KB limit for base64 storage
-      alert("Image is too large. Please select an image under 200KB.");
-      return;
+  const saveVoiceSettings = async (send: boolean, read: boolean) => {
+    if (!user) return;
+    setAutoSendVoice(send);
+    setAutoReadReplies(read);
+    try {
+      await setDoc(doc(db, `users/${user.uid}/private/integrations`), {
+        voice: {
+          autoSend: send,
+          autoRead: read,
+          updatedAt: serverTimestamp()
+        }
+      }, { merge: true });
+    } catch (error) {
+      console.error("Failed to save voice settings:", error);
     }
+  };
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setNewAgent(prev => ({ ...prev, avatar: reader.result as string }));
-    };
-    reader.readAsDataURL(file);
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setIsAgentAvatarUploading(true);
+    try {
+      const agentId = editingAgentId || 'temp_creation';
+      const path = getAgentAvatarPath(user.uid, `${agentId}_${Date.now()}`);
+      const url = await uploadFile(path, file);
+      setNewAgent(prev => ({ ...prev, avatarUrl: url }));
+      console.log("Agent avatar uploaded successfully:", url);
+    } catch (err: any) {
+      console.error("Agent avatar upload failed:", err);
+      alert(`Upload failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsAgentAvatarUploading(false);
+    }
   };
 
   const saveOrUpdateCustomAgent = async () => {
@@ -499,6 +570,7 @@ export default function App() {
         role: '',
         personality: '',
         avatar: '🤖',
+        avatarUrl: '',
         systemInstruction: '',
         accessLevel: 'family_safe',
         traits: {
@@ -521,6 +593,7 @@ export default function App() {
       role: agent.role,
       personality: agent.personality,
       avatar: agent.avatar,
+      avatarUrl: agent.avatarUrl,
       systemInstruction: agent.systemInstruction,
       accessLevel: agent.accessLevel || 'family_safe',
       traits: agent.traits || {
@@ -613,7 +686,16 @@ export default function App() {
 
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
-      setInput(prev => (prev ? `${prev} ${transcript}` : transcript));
+      const newInput = input ? `${input} ${transcript}` : transcript;
+      setInput(newInput);
+      
+      if (autoSendVoice) {
+        // Trigger send if autoSend is on
+        const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+        // We need to pass the actual transcript or wait for state update
+        // It's safer to use a temporary variable for the submission
+        sendMessage(fakeEvent, newInput);
+      }
     };
 
     recognition.onerror = (event: any) => {
@@ -633,7 +715,22 @@ export default function App() {
       // Toggle off if already speaking the same one
       setSpeakingMessageId(null);
       window.speechSynthesis.cancel();
+      if (audioSourceRef.current) {
+        try {
+          audioSourceRef.current.stop();
+        } catch (e) {}
+        audioSourceRef.current = null;
+      }
       return;
+    }
+
+    // Stop current speech
+    window.speechSynthesis.cancel();
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch (e) {}
+      audioSourceRef.current = null;
     }
 
     setSpeakingMessageId(message.id);
@@ -678,8 +775,11 @@ export default function App() {
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
         source.onended = () => {
-          setSpeakingMessageId(null);
+          if (speakingMessageId === message.id) {
+            setSpeakingMessageId(null);
+          }
         };
+        audioSourceRef.current = source;
         source.start();
       } else {
         throw new Error("No audio data received");
@@ -848,6 +948,7 @@ export default function App() {
 
   // Global Config Listener
   useEffect(() => {
+    if (!user) return;
     return onSnapshot(doc(db, 'settings', 'global'), (doc) => {
       if (doc.exists()) {
         const data = doc.data();
@@ -859,7 +960,19 @@ export default function App() {
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/global', auth);
     });
-  }, []);
+  }, [user]);
+
+  // Thread switch safety: Stop playback when switching threads
+  useEffect(() => {
+    window.speechSynthesis.cancel();
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch (e) {}
+      audioSourceRef.current = null;
+    }
+    setSpeakingMessageId(null);
+  }, [activeThreadId]);
 
   // Sync selected agents with current thread
   useEffect(() => {
@@ -1024,9 +1137,46 @@ export default function App() {
     }
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || !user) return;
+  const searchGithub = async (args: { query: string }) => {
+    if (!user) return { error: "Not logged in" };
+    const idToken = await user.getIdToken();
+    try {
+      const resp = await fetch('/api/github/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify(args)
+      });
+      return await resp.json();
+    } catch (e) {
+      return { error: "Failed to search GitHub" };
+    }
+  };
+
+  const getGithubContents = async (args: { owner: string, repo: string, path: string }) => {
+    if (!user) return { error: "Not logged in" };
+    const idToken = await user.getIdToken();
+    try {
+      const resp = await fetch('/api/github/contents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify(args)
+      });
+      return await resp.json();
+    } catch (e) {
+      return { error: "Failed to fetch GitHub contents" };
+    }
+  };
+
+  const sendMessage = async (e: React.FormEvent, overrideInput?: string) => {
+    if (e) e.preventDefault();
+    const finalInput = overrideInput !== undefined ? overrideInput : input;
+    if (!finalInput.trim() || !user) return;
 
     let threadId = activeThreadId;
     const isNewThread = !threadId;
@@ -1035,7 +1185,7 @@ export default function App() {
       threadId = `thread_${Date.now()}`;
     }
 
-    const userMsg = input;
+    const userMsg = finalInput;
     setInput('');
     setLoading(true);
 
@@ -1114,6 +1264,7 @@ export default function App() {
           EXTERNAL INTEGRATION PROTOCOLS:
           - NOTION WORKFLOW: Court Planner and Court Creative have high-level access to simulated Notion integrations. Planner must prioritize task breakdown into Notion-ready databases. Creative must generate content specifically formatted for Notion pages.
           - GOOGLE APPS SYNERGY: Court Creative can identify and suggest relevant Google Drive files (Docs, Sheets, Slides) to be used as reference or output targets.
+          - GITHUB SYNERGY: Court Developer specializes in code learning and project management. Use GitHub tools to search for repositories, read code structures, and help users with assignments or technical projects.
           
           MULTI-USER CONTEXT:
           - This may be a group discussion. Address users by name and be mindful that agents are serving a team, not just an individual.
@@ -1231,6 +1382,30 @@ export default function App() {
                     query: { type: Type.STRING, description: "Search query for emails" }
                   }
                 }
+              },
+              {
+                name: "search_github",
+                description: "Search for repositories on GitHub.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    query: { type: Type.STRING, description: "Repository search query" }
+                  },
+                  required: ["query"]
+                }
+              },
+              {
+                name: "get_github_contents",
+                description: "Get the contents of a file or directory in a GitHub repository.",
+                parameters: {
+                  type: Type.OBJECT,
+                  properties: {
+                    owner: { type: Type.STRING, description: "The repository owner" },
+                    repo: { type: Type.STRING, description: "The repository name" },
+                    path: { type: Type.STRING, description: "The file or directory path" }
+                  },
+                  required: ["owner", "repo", "path"]
+                }
               }
             ]
           }]
@@ -1263,6 +1438,12 @@ export default function App() {
           } else if (call.name === 'search_google_drive') {
             const data = await searchGoogleDrive(call.args as any);
             toolResults.push({ name: 'search_google_drive', content: data });
+          } else if (call.name === 'search_github') {
+            const data = await searchGithub(call.args as any);
+            toolResults.push({ name: 'search_github', content: data });
+          } else if (call.name === 'get_github_contents') {
+            const data = await getGithubContents(call.args as any);
+            toolResults.push({ name: 'get_github_contents', content: data });
           } else if (call.name === 'list_calendar_events') {
             const data = await listCalendarEvents();
             toolResults.push({ name: 'list_calendar_events', content: data });
@@ -1286,7 +1467,7 @@ export default function App() {
       }
 
       // 3. Add AI message
-      await addDoc(collection(db, `threads/${threadId}/messages`), {
+      const aiMsgRef = await addDoc(collection(db, `threads/${threadId}/messages`), {
         threadId,
         userId: user.uid,
         senderId: 'court_system',
@@ -1294,6 +1475,14 @@ export default function App() {
         content: finalResponse || "I encountered an issue processing that request.",
         timestamp: serverTimestamp()
       });
+
+      if (autoReadReplies && finalResponse) {
+        speakMessage({
+          id: aiMsgRef.id,
+          content: finalResponse,
+          senderType: 'agent'
+        } as Message);
+      }
 
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -1402,6 +1591,41 @@ export default function App() {
 
                   <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
                     <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-black font-bold">
+                         <Github className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white">GitHub Integration</h4>
+                        <p className="text-xs text-[#9CA3AF]">Assignments, projects, and code sync</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                       <label className="text-[10px] uppercase font-black tracking-widest text-[#6B7280]">Personal Access Token</label>
+                       <div className="flex gap-2">
+                          <input 
+                            type="password"
+                            value={githubKey}
+                            onChange={(e) => setGithubKey(e.target.value)}
+                            placeholder="ghp_..."
+                            className="flex-1 bg-[#121418] border border-[#374151] rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-[#4F46E5]"
+                          />
+                          <button 
+                            onClick={saveGithubKey}
+                            disabled={saveStatus === 'saving'}
+                            className="px-6 py-3 bg-[#4F46E5] text-white rounded-xl font-bold text-xs hover:bg-[#4338CA] transition-all disabled:opacity-50"
+                          >
+                            {saveStatus === 'saving' ? '...' : saveStatus === 'saved' ? <Check className="w-4 h-4" /> : 'SAVE'}
+                          </button>
+                       </div>
+                       <p className="text-[10px] text-[#6B7280]">
+                         Generate a token in your <a href="https://github.com/settings/tokens" target="_blank" className="text-[#4F46E5] hover:underline inline-flex items-center gap-1">GitHub Settings <ExternalLink className="w-2 h-2" /></a>
+                       </p>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
+                    <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-blue-600">
                          <Layout className="w-6 h-6" />
                       </div>
@@ -1434,6 +1658,54 @@ export default function App() {
 
                   <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
                     <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-amber-500 rounded-xl flex items-center justify-center text-black">
+                         <Mic className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white">Voice & Accessibility</h4>
+                        <p className="text-xs text-[#9CA3AF]">Configure audio interactions</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 gap-3">
+                      <button 
+                        onClick={() => saveVoiceSettings(!autoSendVoice, autoReadReplies)}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border transition-all flex items-center justify-between group",
+                          autoSendVoice ? "bg-amber-500/10 border-amber-500/40 text-amber-400" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                        )}
+                      >
+                         <div className="flex items-center gap-3 text-left">
+                            <Zap className={cn("w-4 h-4", autoSendVoice ? "text-amber-400 scale-110" : "text-[#4B5563]")} />
+                            <div>
+                               <p className="text-[10px] font-black uppercase tracking-widest">Auto-Send Voice</p>
+                               <p className="text-[9px] opacity-60">Fire message immediately after speaking</p>
+                            </div>
+                         </div>
+                         <div className={cn("w-2 h-2 rounded-full", autoSendVoice ? "bg-amber-400 animate-pulse" : "bg-[#374151]")} />
+                      </button>
+
+                      <button 
+                        onClick={() => saveVoiceSettings(autoSendVoice, !autoReadReplies)}
+                        className={cn(
+                          "w-full px-4 py-3 rounded-xl border transition-all flex items-center justify-between group",
+                          autoReadReplies ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-400" : "bg-[#121418] border-[#374151] text-[#9CA3AF]"
+                        )}
+                      >
+                         <div className="flex items-center gap-3 text-left">
+                            <Volume2 className={cn("w-4 h-4", autoReadReplies ? "text-indigo-400 scale-110" : "text-[#4B5563]")} />
+                            <div>
+                               <p className="text-[10px] font-black uppercase tracking-widest">Auto-Read Replies</p>
+                               <p className="text-[9px] opacity-60">Agents will vocalize their responses</p>
+                            </div>
+                         </div>
+                         <div className={cn("w-2 h-2 rounded-full", autoReadReplies ? "bg-indigo-400 animate-pulse" : "bg-[#374151]")} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-6 bg-[#1F2937] rounded-2xl border border-[#374151] space-y-4">
+                    <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
                          <Zap className="w-6 h-6" />
                       </div>
@@ -1460,7 +1732,7 @@ export default function App() {
                               : "bg-[#121418] border-[#374151] text-[#9CA3AF] hover:border-[#4F46E5]"
                           )}
                         >
-                          <Avatar avatar={agent.avatar} className="w-4 h-4" />
+                          <Avatar avatar={agent.avatar} url={agent.avatarUrl} className="w-4 h-4" />
                           {agent.name}
                         </button>
                       ))}
@@ -1522,12 +1794,14 @@ export default function App() {
                         />
                         <div className={cn(
                           "w-10 h-10 rounded-xl border-2 border-dashed flex items-center justify-center transition-all overflow-hidden",
-                          newAgent.avatar.startsWith('data:image') 
+                          (newAgent.avatar.startsWith('data:image') || newAgent.avatarUrl)
                             ? "border-[#4F46E5] bg-[#4F46E5]/10" 
                             : "border-[#374151] hover:border-[#4F46E5]/50"
                         )}>
-                          {newAgent.avatar.startsWith('data:image') ? (
-                            <Avatar avatar={newAgent.avatar} className="w-full h-full rounded-lg" />
+                          {isAgentAvatarUploading ? (
+                            <Loader2 className="w-4 h-4 text-[#4F46E5] animate-spin" />
+                          ) : (newAgent.avatar.startsWith('data:image') || newAgent.avatarUrl) ? (
+                            <Avatar avatar={newAgent.avatar} url={newAgent.avatarUrl} className="w-full h-full rounded-lg" />
                           ) : (
                             <Plus className="w-4 h-4 text-[#6B7280]" />
                           )}
@@ -1953,14 +2227,14 @@ export default function App() {
                           agent.id === 'agent_creative' ? "bg-emerald-900/50 text-emerald-300" : 
                           "bg-amber-900/50 text-amber-300"
                         )}>
-                          <Avatar avatar={agent.avatar} className="w-full h-full flex items-center justify-center" />
+                          <Avatar avatar={agent.avatar} url={agent.avatarUrl} className="w-full h-full flex items-center justify-center" />
                         </div>
                         <div className="overflow-hidden flex-1">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5 overflow-hidden">
                               <p className="text-xs font-bold truncate group-hover:text-white">{agent.name}</p>
                               {defaultAgentIds.includes(agent.id) && (
-                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" title="Quick Summon Default" />
+                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500/20 flex-shrink-0" />
                               )}
                             </div>
                             {selectedAgentIds.includes(agent.id) && <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 2 }} className="w-1 h-1 rounded-full bg-[#4F46E5]" />}
@@ -2183,7 +2457,7 @@ export default function App() {
                             )}
                             title={`${agent.name} (${customAgents.find(ca => ca.id === aid) ? 'Editable' : 'Default'})`}
                           >
-                            <Avatar avatar={agent.avatar} className="w-full h-full flex items-center justify-center" />
+                            <Avatar avatar={agent.avatar} url={agent.avatarUrl} className="w-full h-full flex items-center justify-center" />
                           </button>
                           {customAgents.find(ca => ca.id === aid) && (
                             <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#4F46E5] rounded-full border border-[#16191F] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -2239,14 +2513,12 @@ export default function App() {
             >
               {isFocusMode ? 'Focus: High' : 'Focus: Off'}
             </button>
-            <div className="w-9 h-9 rounded-full border-2 border-[#374151] shadow-sm overflow-hidden bg-[#1F2937]">
-              {user.photoURL ? (
-                <img src={user.photoURL} alt="User" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <UserIcon className="w-4 h-4 text-[#6B7280]" />
-                </div>
-              )}
+            <div className="w-9 h-9 rounded-full border-2 border-[#374151] shadow-sm overflow-hidden bg-[#1F2937] ring-offset-2 ring-indigo-500 hover:ring-2 transition-all cursor-pointer" onClick={() => setShowMemberProfileModal(true)}>
+              <Avatar 
+                avatar={user.displayName?.[0] || 'U'} 
+                url={profiles[user.uid]?.photoURL || user.photoURL || undefined} 
+                className="w-full h-full flex items-center justify-center font-bold" 
+              />
             </div>
           </div>
         </header>
@@ -2283,10 +2555,15 @@ export default function App() {
                 msg.senderType === 'user' ? "bg-[#374151] text-[#D1D5DB]" : "bg-[#4F46E5] text-white"
               )}>
                 {msg.senderType === 'user' ? (
-                  profiles[msg.senderId]?.photoURL ? <img src={profiles[msg.senderId].photoURL} alt="" /> : profiles[msg.senderId]?.displayName?.[0] || 'U'
+                  <Avatar 
+                    avatar={profiles[msg.senderId]?.displayName?.[0] || 'U'} 
+                    url={profiles[msg.senderId]?.photoURL}
+                    className="w-full h-full flex items-center justify-center font-bold" 
+                  />
                 ) : (
                   <Avatar 
                     avatar={allAgents.find(a => msg.content.includes(`[${a.name}]`))?.avatar || '🤖'} 
+                    url={allAgents.find(a => msg.content.includes(`[${a.name}]`))?.avatarUrl}
                     className="w-full h-full flex items-center justify-center"
                   />
                 )}
@@ -2331,20 +2608,29 @@ export default function App() {
                     </ReactMarkdown>
                   </div>
                   {msg.senderType === 'agent' && (
-                    <button 
-                      onClick={() => speakMessage(msg)}
-                      className={cn(
-                        "absolute -bottom-6 right-0 p-1 rounded-md transition-all",
-                        speakingMessageId === msg.id ? "text-indigo-400 bg-indigo-500/10" : "text-[#4B5563] hover:text-indigo-400 opacity-0 group-hover/msg:opacity-100"
-                      )}
-                      title="Speak Message"
-                    >
-                      {speakingMessageId === msg.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Volume2 className="w-3 h-3" />
-                      )}
-                    </button>
+                    <div className="absolute -bottom-6 right-0 flex gap-1 p-1 bg-[#121418]/60 backdrop-blur-sm rounded-lg border border-[#2A2E37] opacity-0 group-hover/msg:opacity-100 transition-all shadow-xl">
+                      <button 
+                        onClick={() => speakMessage(msg)}
+                        className={cn(
+                          "p-1.5 rounded-md transition-all flex items-center gap-2",
+                          speakingMessageId === msg.id ? "text-red-400 bg-red-500/10" : "text-[#9CA3AF] hover:text-indigo-400"
+                        )}
+                        title={speakingMessageId === msg.id ? "Stop Playback" : "Speak Message"}
+                      >
+                        {speakingMessageId === msg.id ? (
+                          <>
+                            <div className="flex gap-0.5 items-end h-3">
+                              <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0 }} className="w-0.5 bg-red-400" />
+                              <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0.2 }} className="w-0.5 bg-red-400" />
+                              <motion.div animate={{ height: [6, 10, 6] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0.1 }} className="w-0.5 bg-red-400" />
+                            </div>
+                            <X className="w-3 h-3" />
+                          </>
+                        ) : (
+                          <Volume2 className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
                   )}
 
                   {/* Message Reactions */}
@@ -2397,6 +2683,28 @@ export default function App() {
           "absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-[#0F1115] via-[#0F1115] to-transparent",
           isFocusMode ? "max-w-3xl mx-auto" : ""
         )}>
+          <AnimatePresence>
+            {isRecording && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="mb-4 flex items-center justify-center"
+              >
+                <div className="px-6 py-2 bg-red-500/10 border border-red-500/30 rounded-full flex items-center gap-3 shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+                   <div className="flex gap-1 items-end h-3">
+                      <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0 }} className="w-1 bg-red-500 rounded-full" />
+                      <motion.div animate={{ height: [8, 4, 8] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0.2 }} className="w-1 bg-red-500 rounded-full" />
+                      <motion.div animate={{ height: [12, 8, 12] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0.4 }} className="w-1 bg-red-500 rounded-full" />
+                      <motion.div animate={{ height: [6, 10, 6] }} transition={{ repeat: Infinity, duration: 0.5, delay: 0.1 }} className="w-1 bg-red-500 rounded-full" />
+                   </div>
+                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500">AnchorCourt Listening...</span>
+                   {autoSendVoice && <span className="text-[8px] font-bold text-red-500/60 uppercase">Auto-Send Armed</span>}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <form 
             onSubmit={sendMessage}
             className="relative flex items-center transition-all group"
@@ -2589,7 +2897,11 @@ export default function App() {
                                </div>
                             </div>
                             <div className="w-5 h-5 rounded-lg bg-[#1F2937] flex items-center justify-center text-[10px] overflow-hidden" title={assignee?.name}>
-                              <Avatar avatar={assignee?.avatar || '🤖'} className="w-full h-full flex items-center justify-center" />
+                              <Avatar 
+                                avatar={assignee?.avatar || '🤖'} 
+                                url={assignee?.avatarUrl}
+                                className="w-full h-full flex items-center justify-center" 
+                              />
                             </div>
                           </div>
                           <p className="text-[9px] text-[#6B7280] leading-normal line-clamp-2 mb-3 px-5">
@@ -2629,7 +2941,11 @@ export default function App() {
                   <div className="flex -space-x-2 mb-4">
                     {allAgents.filter(a => selectedAgentIds.includes(a.id)).map(a => (
                       <div key={a.id} className="w-8 h-8 rounded-full bg-[#16191F] border-2 border-[#1F2937] flex items-center justify-center text-sm overflow-hidden" title={a.name}>
-                        <Avatar avatar={a.avatar} className="w-full h-full flex items-center justify-center" />
+                        <Avatar 
+                          avatar={a.avatar} 
+                          url={a.avatarUrl}
+                          className="w-full h-full flex items-center justify-center" 
+                        />
                       </div>
                     ))}
                   </div>
@@ -2716,7 +3032,7 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Global Directives */}
                   <div className="space-y-6">
-                    <div className="p-6 bg-[#0F1115] border border-[#2A2E37] rounded-3xl space-y-4">
+                    <div className="p-6 bg-[#1F2937] border border-[#2A2E37] rounded-3xl space-y-4">
                        <div className="flex items-center gap-3 text-amber-500">
                          <Shield className="w-5 h-5" />
                          <h3 className="text-sm font-bold uppercase tracking-widest">Global Directives</h3>
@@ -2890,12 +3206,12 @@ export default function App() {
                                 className="w-full p-3 bg-[#1F2937]/50 border border-[#2A2E37] rounded-2xl flex items-center justify-between hover:border-emerald-500/50 hover:bg-[#1F2937] transition-all group cursor-pointer text-left focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
                               >
                                 <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-full bg-[#121418] flex items-center justify-center text-emerald-500 font-bold text-sm ring-1 ring-emerald-500/20 group-hover:ring-emerald-500/40 transition-all relative">
-                                    {profile.photoURL ? (
-                                      <img src={profile.photoURL} alt={profile.displayName} className="w-full h-full rounded-full object-cover" referrerPolicy="no-referrer" />
-                                    ) : (
-                                      profile.displayName.slice(0, 2).toUpperCase()
-                                    )}
+                                  <div className="w-10 h-10 rounded-full bg-[#121418] flex items-center justify-center text-emerald-500 font-bold text-sm ring-1 ring-emerald-500/20 group-hover:ring-emerald-500/40 transition-all relative overflow-hidden">
+                                    <Avatar 
+                                      avatar={profile.displayName.slice(0, 2).toUpperCase()} 
+                                      url={profile.photoURL} 
+                                      className="w-full h-full flex items-center justify-center" 
+                                    />
                                     <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-[#1F2937] rounded-full"></div>
                                   </div>
                                   <div className="overflow-hidden">
@@ -2951,31 +3267,39 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {selectedUserId && (
-          <MemberProfileModal 
-            isOpen={!!selectedUserId}
-            onClose={() => setSelectedUserId(null)}
-            config={adminMemberConfig}
-            onSave={adminSaveMemberConfig}
-            isSaving={adminMemberConfigSaving}
-            error={null}
-          />
-        )}
-      </AnimatePresence>
- 
-       <AnimatePresence>
-        {showMemberProfileModal && (
-          <MemberProfileModal 
-            isOpen={showMemberProfileModal}
-            onClose={() => setShowMemberProfileModal(false)}
-            config={memberConfig}
-            onSave={saveMemberConfig}
-            isSaving={memberConfigSaving}
-            error={memberConfigError}
-          />
-        )}
-      </AnimatePresence>
+          <AnimatePresence>
+            {selectedUserId && (
+              <MemberProfileModal 
+                isOpen={!!selectedUserId}
+                onClose={() => setSelectedUserId(null)}
+                config={adminMemberConfig}
+                onSave={adminSaveMemberConfig}
+                loading={adminMemberConfigLoading}
+                saving={adminMemberConfigSaving}
+                error={null}
+                userId={selectedUserId || undefined}
+                photoURL={selectedUserId ? profiles[selectedUserId]?.photoURL : undefined}
+                isAdminView={true}
+                memberName={selectedUserId ? profiles[selectedUserId]?.displayName : undefined}
+              />
+            )}
+          </AnimatePresence>
+     
+           <AnimatePresence>
+            {showMemberProfileModal && (
+              <MemberProfileModal 
+                isOpen={showMemberProfileModal}
+                onClose={() => setShowMemberProfileModal(false)}
+                config={memberConfig}
+                onSave={saveMemberConfig}
+                loading={memberConfigLoading}
+                saving={memberConfigSaving}
+                error={memberConfigError}
+                userId={user?.uid}
+                photoURL={user?.uid ? profiles[user.uid]?.photoURL : undefined}
+              />
+            )}
+          </AnimatePresence>
 
       <ImageStudio 
         isOpen={showImageStudio}
